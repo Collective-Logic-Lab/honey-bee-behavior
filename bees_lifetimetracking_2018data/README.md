@@ -17,4 +17,4 @@ Other files:
 - **definitions_2019.py, all_cohorts_2019.csv, summary_experiments_2019.csv**: Definitions and information for 2019 data
 - **'Data processing - 1 - metrics and dataframes.ipynb', Data processing - 0 - database query.ipynb**:  Codes used to process data. 
 
-
+The folder 'data2018' contains results needed to reprocedure figures and results in the paper. Full dataset, including x-y trajectories and behavioral metrics calculated at different timescales (per-hour,per-5 minute, per-1 minute), is available at Zenodo:  https://doi.org/10.5281/zenodo.6045859
