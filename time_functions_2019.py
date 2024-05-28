@@ -10,6 +10,7 @@
 #
 
 import datetime as dt
+import numpy as np
 from bees_drones_2019data import definitions_2019 as bd
 
 FRAMES_PER_SECOND = 3
