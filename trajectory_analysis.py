@@ -7,11 +7,123 @@
 #
 
 import numpy as np
+import pandas as pd
+import scipy.signal
+import time_functions_2019 as tf
 
 FRAMES_PER_SECOND = 3
 
+# modified from
+# https://swharden.com/blog/2020-09-23-signal-filtering-in-python/
+def lowpass(data, cutoff: float, sample_rate: float,
+    poles: int = 5):
+    """
+    Takes a pandas series, does linear interpolation to fill
+    in missing values, drops nans at either end of the time
+    series that can't be interpolated, applies a low pass
+    filter, and returns datapoints only at timepoints that
+    had data in the original series.
+    """
+    # set up filter
+    sos = scipy.signal.butter(poles, cutoff, 'lowpass', fs=sample_rate, output='sos')
+
+    # filter interpolated data
+    interpolated_data = data.interpolate().dropna()
+    filtered_data_array = scipy.signal.sosfiltfilt(sos, interpolated_data)
+
+    # re-make into pandas series with NaNs at the same locations as in the original data
+    filtered_data_series = pd.Series(filtered_data_array,index=interpolated_data.index)
+    filtered_data_series[data.isna()] = np.nan
+    
+    return filtered_data_series
+
+def add_low_pass_filter(t,cutoff=0.05,
+    sample_rate=FRAMES_PER_SECOND):
+    """
+    Add low-pass filtered position data to a given trajectory
+    dataFrame.  The input trajectory should be indexed by
+    bee and time.  (see add_bee_time_index)
+    
+    Fills in any missing frame numbers with nans before
+    applying the low-pass filter.
+    
+    cutoff (0.05)       : Cutoff frequency, in Hz
+    sample_rate (3)     : Sample rate of data, in Hz
+    
+    """
+    for bee in t.index.unique(level='uid'):
+        # t_bee does not include data for every frame
+        t_bee = t.loc[bee].copy()
+        # t_bee_upsampled includes a row for every frame
+        t_bee_upsampled = upsample(t_bee,sample_rate)
+        
+        # perform low-pass filter on upsampled data
+        # and then drop the nans coming from upsampling
+        x_filtered = lowpass(t_bee_upsampled['x'],
+                        cutoff,sample_rate).dropna()
+        y_filtered = lowpass(t_bee_upsampled['y'],
+                        cutoff,sample_rate).dropna()
+        
+        # set index to match with t
+        x_filtered.index = pd.Index(
+            (bee,c) for c in x_filtered.index)
+        y_filtered.index = pd.Index(
+            (bee,c) for c in y_filtered.index)
+        
+        # add filtered data into the original trajectory t
+        t.loc[bee,'filtered x'] = x_filtered
+        t.loc[bee,'filtered y'] = y_filtered
+    
+def add_bee_time_index(t,frames_per_second=FRAMES_PER_SECOND):
+    """
+    Add MultiIndex to the given trajectory DataFrame, indexed
+    first by bee ID and second by a DateTime object.
+    
+    Sorts the trajectory DataFrame by bee ID and time.
+    """
+    # compute datetimes from days and frame numbers
+    timefunc = lambda row: tf.framenum_to_datetime(
+        int(row['daynum']),row['framenum'],frames_per_second)
+    t['time'] = t.apply(timefunc,axis=1)
+    
+    # set up bee,datetime MultiIndex
+    t.set_index(['uid','time'], inplace=True)
+    t = t.sort_index()
+    
+def upsample(t_bee,frames_per_second=FRAMES_PER_SECOND):
+    """
+    Returns trajectory for a single bee with missing
+    frames inserted as NaNs.
+    
+    t_bee should be indexed by time only.
+    
+    Currently works only for 3 frames per second.
+    """
+    
+    # should be given data for single bee, indexed by time
+    assert(t_bee.index.name=='time')
+    
+    # currently only works for 3 frames per second
+    assert(frames_per_second == 3)
+    
+    # need to be fancy here since 1/frames_per_second
+    # is not an integer number of milliseconds...
+    d_list = []
+    d0 = t_bee.resample(
+            tf.dt.timedelta(seconds=1),
+                offset=tf.dt.timedelta(seconds=0/3)).asfreq()
+    d1 = t_bee.resample(
+            tf.dt.timedelta(seconds=1),
+                offset=tf.dt.timedelta(seconds=1/3)).asfreq()
+    d2 = t_bee.resample(
+            tf.dt.timedelta(seconds=1),
+                offset=tf.dt.timedelta(seconds=2/3)).asfreq()
+    return pd.concat([d0,d1,d2]).sort_index()
+        
+
 def add_speed_data(t,pixels_per_cm=80,
-    frames_per_second=FRAMES_PER_SECOND,max_delay_seconds=1,):
+    frames_per_second=FRAMES_PER_SECOND,max_delay_seconds=1,
+    use_filtered=True):
     """
     Adds speed data to a given trajectory dataFrame.
 
@@ -27,14 +139,25 @@ def add_speed_data(t,pixels_per_cm=80,
                                  metrics)
     """
     
-    t['delta x'] = np.concatenate([[np.nan],np.diff(t['x'])])
-    t['delta y'] = np.concatenate([[np.nan],np.diff(t['y'])])
+    if use_filtered:
+        x,y = t['filtered x'],t['filtered y']
+    else:
+        x,y = t['x'],t['y']
+       
+    # get bee ids, which may be in the trajectory's index
+    if 'uid' in t.index.names:
+        uids = t.reset_index(level='uid')['uid']
+    else:
+        uids = t['uid']
+        
+    t['delta x'] = np.concatenate([[np.nan],np.diff(x)])
+    t['delta y'] = np.concatenate([[np.nan],np.diff(y)])
     t['delta framenum'] = np.concatenate([[np.nan],
                             np.diff(t['framenum'])])
     t['delta camera'] = np.concatenate([[np.nan],
                             np.diff(t['camera'])])
     t['delta uid'] = np.concatenate([[np.nan],
-                            np.diff(t['uid'])])
+                            np.diff(uids)])
 
     # remove cases of different bees (note: unlikely not to
     # already be caught by the time delay filter below?)
