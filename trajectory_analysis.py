@@ -178,3 +178,70 @@ def add_speed_data(t,pixels_per_cm=80,
     # remove cases in which the bee is observed across
     # different cameras (as in bees_drones_2019data)
     t.loc[t['delta camera'] != 0, 'speed (cm/s)'] = np.nan
+
+
+def state_matrix(df,col,divisions_per_day,df_type='behavioral'):
+    """
+    Takes a dataframe with specific columns, depending
+    on `df_type`:
+      - `Bee unique ID`, `Day number`, and `timedivision`
+         if df_type = 'behavioral'
+         (e.g. from a `df_day5min` file)
+      - `uid`, `daynum`, `framenum`
+         if df_type = 'trajectory'
+         (e.g. from a `beetrajectories` file)
+    
+    Returns a dataframe indexed by bee id and with columns
+    corresponding to time, with each element corresponding
+    to the column `col` of the input dataframe.
+
+    A given time division is included if (and only if) any
+    data are available for that time division.
+    A given bee is included if (and only if) any data are
+    available for that bee at any time.
+
+    divisions_per_day          : number of time divisions
+                                 per day.  For df_type =
+                                 'trajectory', this should
+                                 typically be
+                                 24*60*60*3 = 259200
+                                 (for 3 frames per second)
+    df_type ('behavioral')     : 'behavioral' or 'trajectory'
+    """
+    assert(type(col)==str)
+
+    if df_type == 'behavioral':
+        daycolumn = 'Day number'
+        beecolumn = 'Bee unique ID'
+        timecolumn = 'timedivision'
+    elif df_type == 'trajectory':
+        daycolumn = 'daynum'
+        beecolumn = 'uid'
+        timecolumn = 'framenum'
+    else:
+        raise(Exception,
+            'Unrecognized df_type: {}'.format(df_type))
+    
+    # we will build lists of times and column_data
+    column_data_list,times = [],[]
+    
+    days = df[daycolumn].unique()
+    days.sort()
+    # loop over days
+    for daynum in days:
+        df_day = df[df[daycolumn]==daynum]
+        timedivisions = df_day[timecolumn].unique()
+        timedivisions.sort()
+        # loop over time divisions within a given day
+        for timedivision in timedivisions:
+            df_day_time = df_day[df_day[timecolumn]==timedivision]
+            
+            # construct column of data for the given time
+            column_data_list.append(
+                df_day_time.set_index(beecolumn)[col] )
+
+            # convert time division to an absolute time
+            times.append(tf.timediv_to_datetime(
+                int(daynum),timedivision,divisions_per_day))
+            
+    return pd.DataFrame(column_data_list,index=times).T
