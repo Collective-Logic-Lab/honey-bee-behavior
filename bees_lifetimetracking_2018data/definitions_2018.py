@@ -7,17 +7,17 @@ import seaborn as sns
 year = 2018
 startday = pd.Timestamp(year,7,16)  # actual, for 2018:   16 July  (cameras turned on)
 endday = pd.Timestamp(year,10,9)    # actual, for 2018:   was 10 September, but is now 09 Oct
-alldaytimestamps = pd.date_range(start=startday,end=endday,freq='D')
+alldaytimestamps = pd.date_range(start=startday,end=endday) #,freq='D'
 numdays = len(alldaytimestamps)  # just do to 43?
 numbees = 4096  #  I think 4096 is the total number.  This is the total number of barcodes, NOT the total number of bees actually tracked
 numsubstrates = 10 # 10 actual substrates, and then 0 for undefined
 comb_daynums = np.array([ 0,  5, 10, 15, 20, 26, 30, 35, 40, 44, 65, 75, 85]) + 16 - startday.day  # days from start day, assuming start day is in July
 
 # get bee cohort data, and just process these for a single one
-cohort_data = pd.read_csv('all_cohorts.csv')
+cohort_data = pd.read_csv('/home/stefan/jupyter-lab-projects/CLL/bee-project/bees_lifetimetracking_2018data/all_cohorts.csv')
 cohort_colornames = np.unique(cohort_data['cohort'])
 cohort_tagids = [np.array(cohort_data[cohort_data['cohort']==name]['beeID']) for name in cohort_colornames]
-cohort_birthdates = np.array([pd.Timestamp(np.array(cohort_data['DOB'][cohort_data['cohort']==c])[0],freq='D') for c in cohort_colornames])
+cohort_birthdates = np.array([pd.Timestamp(np.array(cohort_data['DOB'][cohort_data['cohort']==c])[0]) for c in cohort_colornames])
 cohort_colonynames = np.array([cohort_data[cohort_data['cohort']==name]['colony'].iloc[0] for name in cohort_colornames])
 
 numbeestracked = np.sum([len(l) for l in cohort_tagids])
