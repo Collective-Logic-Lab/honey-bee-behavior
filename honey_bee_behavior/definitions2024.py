@@ -1,3 +1,8 @@
+# definitions2024.py
+#
+# Hamada
+# 
+
 import numpy as np
 import pandas as pd
 
