@@ -9,7 +9,7 @@
 import numpy as np
 import pandas as pd
 import scipy.signal
-import time_functions_2019 as tf
+from . import time_functions_2019 as tf
 
 FRAMES_PER_SECOND = 3
 
