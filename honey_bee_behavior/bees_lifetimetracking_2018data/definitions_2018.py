@@ -14,7 +14,7 @@ numsubstrates = 10 # 10 actual substrates, and then 0 for undefined
 comb_daynums = np.array([ 0,  5, 10, 15, 20, 26, 30, 35, 40, 44, 65, 75, 85]) + 16 - startday.day  # days from start day, assuming start day is in July
 
 # get bee cohort data, and just process these for a single one
-cohort_data = pd.read_csv('/home/stefan/jupyter-lab-projects/CLL/bee-project/bees_lifetimetracking_2018data/all_cohorts.csv')
+cohort_data = pd.read_csv('/home/stefan/jupyter-lab-projects/CLL/bee-project/honey_bee_behavior/bees_lifetimetracking_2018data/all_cohorts.csv') #HARDCODED ?
 cohort_colornames = np.unique(cohort_data['cohort'])
 cohort_tagids = [np.array(cohort_data[cohort_data['cohort']==name]['beeID']) for name in cohort_colornames]
 cohort_birthdates = np.array([pd.Timestamp(np.array(cohort_data['DOB'][cohort_data['cohort']==c])[0]) for c in cohort_colornames])
