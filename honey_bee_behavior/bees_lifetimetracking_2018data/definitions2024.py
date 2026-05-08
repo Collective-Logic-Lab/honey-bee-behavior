@@ -1,3 +1,6 @@
+# Written by Diya Hamada. April 2025.
+# Supplemental to forage_model_SP25.ipynb data cleaning pipeline. Adds some hardcoded area definition and classification columns.
+
 import numpy as np
 import pandas as pd
 
