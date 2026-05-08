@@ -1,7 +1,5 @@
-# definitions2024.py
-#
-# Hamada
-# 
+# Written by Diya Hamada. April 2025.
+# Supplemental to forage_model_SP25.ipynb data cleaning pipeline. Adds some hardcoded area definition and classification columns.
 
 import numpy as np
 import pandas as pd
@@ -51,6 +49,24 @@ def crossedDanceFloor(df, pix):
     
     return df
 
+# df = beetraj
+def framesSinceLastCross(df):
+    df['last_cross_group'] = (df['cross_df'] == 1).cumsum()
+
+    #frames since last `cross_df == 1`
+    df['frames_since_df_visit'] = df.groupby('last_cross_group').cumcount()
+    
+    # -1 until the first crossing event
+    first_cross_idx = df['cross_df'].eq(1).idxmax()
+    if not df['cross_df'].any():
+        df['frames_since_df_visit'] = -1
+    else:
+        df.loc[:first_cross_idx - 1, 'frames_since_df_visit'] = -1
+        
+    df.drop(columns=['last_cross_group'], inplace=True)
+
+    return df
+
 ## Number of visits to the dance floor (df is beeTraj)!!
 def numOfDanceFloorVisitsTOTAL(df):
     dance = df.groupby(['uid','daynum'])['cross_df'].sum().to_frame(name='df_visits').reset_index()
@@ -63,7 +79,7 @@ def numOfDanceFloorVisitsRUNNINGTOTAL(df):
     
     df['prev_cross_df'] = df.groupby(['uid'])['cross_df'].shift(1)
     df['transitions'] = ((df['prev_cross_df'] == 0) & (df['cross_df'] == 1)).astype(int)
-    visits_total = df.groupby(['uid', 'daynum'])['transitions'].sum().reset_index(name='visits_total')
+    visits_total = df.groupby(['uid','daynum'])['transitions'].sum().reset_index(name='visits_total')
     
     df = pd.merge(df, visits_total, on=['uid', 'daynum'], how='left')
     
@@ -71,59 +87,56 @@ def numOfDanceFloorVisitsRUNNINGTOTAL(df):
     df = df.drop(columns=['prev_cross_df', 'transitions', 'visits_total'])
     
     return df
-'''
-#df is leave
-def numOfDanceFloorVisits(df, beeTraj, frames):
-    df['df_visits'] = 0
+
+def framesSinceLastDFVisit(df):
+    df = df.sort_values(by=['uid', 'daynum'])
     
-    #group by bee and day
-    for (uid, daynum), group in df.groupby(['uid', 'daynum']):
-        rolling_visits = []
-        
-        #for each row in current bee and day group
-        for i in range(len(group)):
-            
-            curr_frame = group.iloc[i]['framenum'] # current frame number
-            curr_visits = numOfDanceFloorVisitsTOTAL(df[df['framenum']<curr_frame]) # current frame's total number of df visits
-            start_frame = curr_frame - frames # desired start frame number
-            
-            startExists = ((beeTraj['framenum'] == start_frame) & 
-                            (beeTraj['uid'] == group.iloc[i]['uid']) & 
-                            (beeTraj['daynum'] == group.iloc[i]['daynum'])).any()
-            
-            #if desired start frame does not exist!
-            if not startExists:
-                print("start doesnt exist")
-                # if start frame is not there, use next most recent frame
-                possible = (beeTraj['uid'] == group.iloc[i]['uid']) & (beeTraj['daynum'] == group.iloc[i]['daynum']) & (beeTraj['framenum'] > (curr_frame - frames))
-                        
-                start_frame = beeTraj[possible]['framenum'].min()
-                print(start_frame)
-            
-            # number of visits at start
-            start_visits_df = beeTraj[(beeTraj['framenum'] == start_frame) &
-                                    (beeTraj['uid'] == group.iloc[i]['uid']) &
-                                    (beeTraj['daynum'] == group.iloc[i]['daynum'])]
-            
-            if not start_visits_df.empty:
-                start_visits = start_visits_df['df_visits'].values[0]
-            else:
-                start_visits = 0
-                            
-            # calculate number of visits in between
-            recent_visits = curr_visits - start_visits
-            rolling_visits.append(recent_visits)
-            
-        rolling_visits = np.array(rolling_visits)
-            
-        print(curr_visits)
-        print(start_visits)
-        
-        # add result to dataframe
-        df.loc[group.index, 'recent_df_visits'] = rolling_visits
-            
+    df['prev_cross_df'] = df.groupby(['uid'])['cross_df'].shift(1)
+    df['transitions'] = ((df['prev_cross_df'] == 0) & (df['cross_df'] == 1)).astype(int)
+    visits_total = df.groupby(['uid','daynum'])['transitions'].sum().reset_index(name='visits_total')
+    df = df.drop(columns=['prev_cross_df', 'transitions', 'visits_total'])
+    
     return df
-'''
+
+#beeTraj MUST have running_total_df_visits
+def numOfDanceFloorVisits(leave, beeTraj, frames):
+    # beeTraj to dict
+    traj_dict = {(uid, daynum): group.set_index('framenum')['running_total_df_visits']
+                 for (uid, daynum), group in beeTraj.groupby(['uid', 'daynum'])}
+    
+    rolling_visits = []
+
+    #group by bee and day
+    for (uid, daynum), group in leave.groupby(['uid', 'daynum']):
+        if (uid, daynum) not in traj_dict:
+            rolling_visits.extend([np.nan] * len(group))
+            continue
+        
+        bee_traj = traj_dict[(uid, daynum)]
+        
+        # for each row in current bee and day group
+        curr_frames = group['framenum'].values
+        curr_visits = group['running_total_df_visits'].values  # current frame's total number of df visits
+        start_frames = curr_frames - frames  #start frame numbers
+        
+        # find closest available frame
+        available_frames = bee_traj.index.values
+        idxs = np.searchsorted(available_frames, start_frames, side='left')
+        idxs = np.clip(idxs, 0, len(available_frames) - 1)  #index check
+        
+        # number of visits at start
+        start_visits = bee_traj.iloc[idxs].values  #get start frame visit counts
+        
+        # calculate number of visits in between
+        recent_visits = curr_visits - start_visits
+        rolling_visits.extend(recent_visits)
+    
+    rolling_visits = np.array(rolling_visits)
+
+    #add result to dataframe
+    leave.loc[:, 'recent_df_visits'] = rolling_visits
+    return leave
+
 ## Hardcoded 5 minute bounds for convinience
 def get5MinBounds(time):
     lower = int(time - 900) 
@@ -179,4 +192,19 @@ def getPlottingEvent(daynum, beeTraj, frame, beeID, framesBefore, framesAfter):
     return plottingEventsNEW, frameNew, frameReturn, frameGone
 
 
-
+def getPlottingEvent1(daynum, beeTraj, frameLeave, frameReturn, beeID, framesBefore, framesAfter):
+    #filter data to just the one bee
+    filteredBee = beeTraj[beeTraj['uid']==beeID]
+    filteredBee = filteredBee.sort_values(by='framenum')
+    
+    # set desired range of frames
+    lastFrame = filteredBee.iloc[-1]['framenum']
+    minFrame = frameLeave - framesBefore #recommended frames before: 1800 (10 minutes), frames after: 50 (just to see the bee is back)
+    if filteredBee.iloc[0]['framenum'] > minFrame:
+        minFrame = filteredBee.iloc[0]['framenum']
+    maxFrame = frameReturn + framesAfter
+    
+    #filtering for desired frames of the bee's data
+    filtered_rows = filteredBee[(filteredBee['framenum'] >= minFrame) & (filteredBee['framenum'] <= maxFrame)]
+    
+    return filtered_rows, minFrame, maxFrame, lastFrame, frameLeave, frameReturn
