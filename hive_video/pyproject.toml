@@ -1,7 +1,7 @@
 [project]
-name = "honey-bee-behavior"
+name = "hive-video"
 version = "0.1.0"
-description = "Analysis tools and notebooks for Collective Logic Lab honey bee behavior data."
+description = "Analysis tools and notebooks for Collective Logic Lab honey bee video data."
 requires-python = ">=3.11"
 dependencies = [
     "h5py>=3.11",
@@ -19,7 +19,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2",
     "ruff>=0.5",
 ]
 
