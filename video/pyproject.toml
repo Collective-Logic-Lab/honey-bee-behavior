@@ -5,6 +5,7 @@ description = "Analysis tools and notebooks for Collective Logic Lab honey bee b
 requires-python = ">=3.11"
 dependencies = [
     "h5py>=3.11",
+    "hf>=1.14.0",
     "ipykernel>=6.29",
     "jupyterlab>=4.2",
     "matplotlib>=3.8",
