@@ -148,10 +148,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--feature-set",
-        choices=("full", "velocity", "beginner"),
+        choices=("full", "exp1", "velocity", "beginner"),
         default="full",
         help=(
-            "Feature preset used for clustering. 'velocity' uses only mean_speed. "
+            "Feature preset used for clustering. 'exp1' uses the pre-angular-neighbor "
+            "Experiment 1 features. 'velocity' uses only mean_speed. "
             "'beginner' uses mean_speed, active_fraction, alignment, and direction_concentration. "
             "The output CSV still includes all computed raw features."
         ),
@@ -413,6 +414,21 @@ FEATURE_NAMES = [
 
 FEATURE_SETS = {
     "full": FEATURE_NAMES,
+    "exp1": [
+        "x_center",
+        "y_center",
+        "mean_vx",
+        "mean_vy",
+        "mean_speed",
+        "mean_speed_sq",
+        "std_speed",
+        "active_fraction",
+        "alignment",
+        "divergence",
+        "curl",
+        "neighbor_speed_contrast",
+        "neighbor_alignment_contrast",
+    ],
     "velocity": ["mean_speed"],
     "beginner": ["mean_speed", "active_fraction", "alignment", "direction_concentration"],
 }

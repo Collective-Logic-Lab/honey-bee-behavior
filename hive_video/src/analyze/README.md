@@ -88,7 +88,7 @@ The scripts support intentionally simple sklearn clustering:
 - `--method gmm` or `--method kmeans`
 - `--clusters`
 - `--pca-components`
-- `--feature-set full|velocity|beginner`
+- `--feature-set full|exp1|velocity|beginner`
 - `--velocity-transform raw|log1p|sqrt|asinh`
 - `--angular-feature-weight`
 - `--neighbor-feature-weight`
@@ -101,6 +101,10 @@ follow-up experiments.
 Use `--top-mask-height` when annotating a captioned resequenced video. It draws
 an opaque black band across the top of the output before writing the annotation
 timestamp, avoiding unreadable text-on-text overlays.
+
+`feature-set=exp1` preserves the pre-angular-neighbor baseline used for
+Experiment 1. The raw feature CSV still includes all computed instrumentation
+columns, but clustering is restricted to the earlier baseline feature set.
 
 ### Long Runs
 
