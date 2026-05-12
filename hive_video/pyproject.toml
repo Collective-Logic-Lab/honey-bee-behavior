@@ -2,14 +2,16 @@
 name = "hive-video"
 version = "0.1.0"
 description = "Analysis tools and notebooks for Collective Logic Lab honey bee video data."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "hf>=1.14.0",
     "ipykernel>=6.29",
     "jupyterlab>=4.2",
     "matplotlib>=3.8",
     "numpy>=1.26",
+    "opencv-python>=4.13.0.92",
     "pandas>=2.2",
+    "pillow>=12.2.0",
     "scikit-learn>=1.5",
     "scipy>=1.13",
     "seaborn>=0.13",
