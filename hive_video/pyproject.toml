@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Analysis tools and notebooks for Collective Logic Lab honey bee video data."
 requires-python = ">=3.11"
 dependencies = [
-    "h5py>=3.11",
     "hf>=1.14.0",
     "ipykernel>=6.29",
     "jupyterlab>=4.2",
@@ -14,7 +13,6 @@ dependencies = [
     "scikit-learn>=1.5",
     "scipy>=1.13",
     "seaborn>=0.13",
-    "tables>=3.9",
 ]
 
 [project.optional-dependencies]
