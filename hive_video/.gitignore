@@ -14,14 +14,12 @@ __pycache__/
 
 # Large generated pipeline outputs.
 #
-# `data/raw/` and `data/experiments/` may contain small permanent seed files,
-# so they are not blanket-ignored here. Be careful before adding large source
-# videos or full rendered outputs.
-data/raw/**/*.part
-data/raw/**/*.tmp
-data/raw/**/.DS_Store
+# Ignore raw source data by default. Keep only the named small seed sample.
+data/raw/**
+!data/raw/
+!data/raw/.gitkeep
 
-# Always keep our pet sample videos
+# Always keep our pet sample video.
 !data/raw/start04_sample_5s.mp4
 
 data/qc/**
