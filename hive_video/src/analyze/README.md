@@ -8,14 +8,52 @@ videos. The higher-level scientific framing for experiments lives in
 
 The current analysis tools are:
 
-1. `annotate_motion_regimes.py`
+1. `run_analysis.py`
+   Run named presets for examples, teaching runs, and long exploratory runs.
+   This is the recommended entry point for experiments that should be
+   reproducible from a preset name.
+
+2. `annotate_motion_regimes.py`
    Read a source MP4, compute dense optical flow over a selected frame range,
    summarize motion in grid cells over rolling time windows, cluster those
-   cell-window feature rows, and render a color-coded overlay video.
+   cell-window feature rows, and render a color-coded overlay video. Use this
+   directly when debugging the instrumentation or trying one-off settings.
 
-2. `run_motion_regime_chunks.py`
+3. `run_motion_regime_chunks.py`
    Run `annotate_motion_regimes.py` over long frame ranges as restartable
-   chunks. This is the preferred entry point for long laptop runs.
+   chunks. `run_analysis.py` can call this runner for chunked presets.
+
+### Presets
+
+`run_analysis.py` records the preset, resolved parameters, command, git commit,
+runner version, and instrumentation version in `analysis_run.json`.
+
+Examples from `hive_video/`:
+
+```bash
+uv run python src/analyze/run_analysis.py \
+  example_5s_beginner \
+  --video data/raw/start04_sample_5s.mp4 \
+  --out data/qc/example_5s_beginner
+```
+
+```bash
+uv run python src/analyze/run_analysis.py \
+  b1_velocity_only \
+  --video data/raw/start04_sample_5s.mp4 \
+  --out data/qc/b1_velocity_only
+```
+
+Use `--set KEY=VALUE` for small controlled deviations from a preset:
+
+```bash
+uv run python src/analyze/run_analysis.py \
+  example_5s_beginner \
+  --video data/raw/start04_sample_5s.mp4 \
+  --out data/qc/example_5s_beginner_grid16 \
+  --set grid_rows=16 \
+  --set grid_cols=16
+```
 
 ### Raw Instrumentation
 

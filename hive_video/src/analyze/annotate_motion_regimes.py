@@ -17,6 +17,8 @@ from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
+from _version import ANALYSIS_VERSION
+
 
 @dataclass(frozen=True)
 class CellFeature:
@@ -733,6 +735,7 @@ def main() -> None:
         args.min_active_fraction,
     )
     metadata = {
+        "analysis_version": ANALYSIS_VERSION,
         "video": str(video),
         "start_frame": args.start_frame,
         "duration_frames": args.duration_frames,

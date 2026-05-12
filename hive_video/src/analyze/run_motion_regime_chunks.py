@@ -11,6 +11,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from _version import ANALYSIS_VERSION
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -137,6 +139,7 @@ def write_run_metadata(
     completed = [row for row in chunks if row["status"] == "done"]
     metadata = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "analysis_version": ANALYSIS_VERSION,
         "video": str(video),
         "out_dir": str(out_dir),
         "start_frame": args.start_frame,
