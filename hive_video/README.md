@@ -32,3 +32,9 @@ uv run python get_base_dist.py
 ```
 
 ... will deliver files to each of the `data/artifacts/`, `data/experiments/`, and `data/raw/` directories. The files in the base distribution are selected as a representative and interesting slices of the overall video repository.
+
+### Organization
+
+The `src` folder has two major submodules and two helper folders. First, the hive videos that we are working with are archived in a disordered state: the sequence of frames cuts to a different part of the video every few minutes. The `resequence` module contains code that applies one algorithm to isolate the individual video segments, and a second algorithm to process those segments into the best identifiable working order. 
+
+The `analyze` module contains code that attempts to classify and visually separate the bee behaviors in the video.
