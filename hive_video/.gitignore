@@ -32,10 +32,7 @@ data/artifacts/**
 !data/artifacts/.gitkeep
 !data/artifacts/README.md
 
-data/experiments/**/*_parts/
-data/experiments/**/*.part
-data/experiments/**/*.tmp
-data/experiments/**/.DS_Store
+data/experiments/*
 
 # Always keep our pet experiment
-!data/experiment_sample_5s
+!data/experiments/experiment_example_5s/
