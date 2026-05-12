@@ -92,10 +92,15 @@ The scripts support intentionally simple sklearn clustering:
 - `--velocity-transform raw|log1p|sqrt|asinh`
 - `--angular-feature-weight`
 - `--neighbor-feature-weight`
+- `--top-mask-height`
 
 These settings are instrumentation controls, not claims that a behavior label is
 final. They are meant to generate reviewable groupings for human inspection and
 follow-up experiments.
+
+Use `--top-mask-height` when annotating a captioned resequenced video. It draws
+an opaque black band across the top of the output before writing the annotation
+timestamp, avoiding unreadable text-on-text overlays.
 
 ### Long Runs
 

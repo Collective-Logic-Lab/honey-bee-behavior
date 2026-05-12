@@ -156,6 +156,15 @@ def parse_args() -> argparse.Namespace:
             "The output CSV still includes all computed raw features."
         ),
     )
+    parser.add_argument(
+        "--top-mask-height",
+        type=int,
+        default=0,
+        help=(
+            "Opaque black band, in output pixels, drawn across the top of the overlay before "
+            "the annotation text. Use this to cover existing captions on resequenced videos."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -634,6 +643,7 @@ def draw_overlay(
     grid_rows: int,
     grid_cols: int,
     min_active_fraction: float,
+    top_mask_height: int,
 ) -> None:
     by_window: dict[int, list[tuple[CellFeature, int, float]]] = {}
     for feature, label, prob_row in zip(features, labels, probs, strict=True):
@@ -680,7 +690,26 @@ def draw_overlay(
                 cv2.arrowedLine(frame, (cx, cy), end, color, 2, tipLength=0.35)
         frame = cv2.addWeighted(overlay, 0.28, frame, 0.72, 0)
         text = f"window {window_id} frame {frame_idx} t={frame_idx / fps:.1f}s"
-        cv2.putText(frame, text, (16, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 1
+        if top_mask_height > 0:
+            mask_height = min(top_mask_height, scale_height)
+            cv2.rectangle(frame, (0, 0), (scale_width, mask_height), (0, 0, 0), thickness=-1)
+            margin = 12
+            (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+            max_width = max(1, scale_width - 2 * margin)
+            scale = font_scale
+            if text_width > max_width:
+                scale *= max_width / text_width
+                (text_width, text_height), baseline = cv2.getTextSize(text, font, scale, thickness)
+            text_x = max(margin, (scale_width - text_width) // 2)
+            text_y = max(text_height + margin, (mask_height + text_height) // 2 - baseline)
+        else:
+            scale = font_scale
+            text_x = 16
+            text_y = 32
+        cv2.putText(frame, text, (text_x, text_y), font, scale, (255, 255, 255), thickness)
         writer.write(frame)
     writer.release()
     cap.release()
@@ -733,6 +762,7 @@ def main() -> None:
         args.grid_rows,
         args.grid_cols,
         args.min_active_fraction,
+        args.top_mask_height,
     )
     metadata = {
         "analysis_version": ANALYSIS_VERSION,
@@ -756,6 +786,7 @@ def main() -> None:
         "velocity_transform": args.velocity_transform,
         "feature_set": args.feature_set,
         "feature_names": feature_names,
+        "top_mask_height": args.top_mask_height,
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"wrote features: {out_dir / 'motion_regime_features.csv'}")
