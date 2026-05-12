@@ -142,6 +142,31 @@ PRESETS: dict[str, dict] = {
             "concat_video": True,
         },
     },
+    "exp4_reseq_full_highres_v0p1": {
+        "description": "Full resequenced-video velocity-compressed high-resolution group-motion run.",
+        "runner": "chunks",
+        "params": {
+            "start_frame": 0,
+            "duration_frames": 263474,
+            "chunk_frames": 9000,
+            "window_frames": 125,
+            "stride_frames": 25,
+            "grid_rows": 48,
+            "grid_cols": 48,
+            "clusters": 10,
+            "method": "gmm",
+            "gmm_covariance_type": "diag",
+            "gmm_reg_covar": 1e-4,
+            "pca_components": 10,
+            "flow_scale_width": 824,
+            "feature_set": "full",
+            "velocity_transform": "log1p",
+            "angular_feature_weight": 2.0,
+            "neighbor_feature_weight": 1.5,
+            "top_mask_height": 72,
+            "concat_video": True,
+        },
+    },
 }
 
 

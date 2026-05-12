@@ -52,8 +52,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--feature-set",
-        choices=("full", "velocity", "beginner"),
+        choices=("full", "exp1", "velocity", "beginner"),
         default="full",
+    )
+    parser.add_argument(
+        "--top-mask-height",
+        type=int,
+        default=0,
+        help="Opaque black band, in output pixels, drawn across the top of chunk overlays.",
     )
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--concat-video", action="store_true")
@@ -162,6 +168,7 @@ def write_run_metadata(
         "neighbor_feature_weight": args.neighbor_feature_weight,
         "velocity_transform": args.velocity_transform,
         "feature_set": args.feature_set,
+        "top_mask_height": args.top_mask_height,
         "overwrite": args.overwrite,
         "concat_video": args.concat_video,
         "safeword_file": str(safeword_file),
@@ -247,6 +254,8 @@ def main() -> None:
                 args.velocity_transform,
                 "--feature-set",
                 args.feature_set,
+                "--top-mask-height",
+                str(args.top_mask_height),
             ]
             print(
                 f"running chunk {chunk_index}: start={start:,} duration={duration:,} out={chunk_out}",
