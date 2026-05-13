@@ -19,19 +19,21 @@ uv sync
 ```
 ... the packages and the data acquisition scripts should now be ready to use.
 
-The project ships with a small amount of seed data in in the `hive_video/data/` directory. A thirty second sample video is included in `video/data/raw/` in the file `starter_video.mp4`. The `video/data/experiments/` directory contains the output of a sample pipeline run on that video. More information for working with these is included in the `docs/getting_started.ipynb` notebook. 
+The project ships with a small amount of seed data in the `hive_video/data/` directory. A five second sample video is included in `data/raw/start04_sample_5s.mp4`, and `data/experiments/experiment_example_5s/` contains the output of a sample pipeline run on that video. Larger artifacts are distributed separately.
 
 ### Getting Data
 
 This repository works with large video files. For most of the work to be done, you'll need to sync be able to access and sync with the public Collective Logic Lab HuggingFace data bucket, `collective-logic-lab/honey-bee`. The repository packaging includes the HuggingFace CLI, `hf`, and it is referenced in our pre-packaged scripts. You can also run `hf` as separately installed on your system or in your Python environment; for example, `uvx hf sync ...`. Since the bucket is public, a login is not required to download the data.
 
-We package video data as "distributions" for download. Currently, a great way to get started is to work with our `base-distribution`, which will be continuously updated. We have included a short script, `get_base_dist.py`. So:
+We package larger video data as named distributions for download. The first curated distribution contains the resequenced video artifact and representative experiment outputs used by `docs/experiments.ipynb`. It does not include `data/raw/start04_sample_5s.mp4` or `data/experiments/experiment_example_5s/`, because those are tracked directly in Git.
+
+To download Distribution 1 into the paths expected by the notebooks:
 
 ```bash
-uv run python get_base_dist.py
+uv run python get_dist_1.py
 ```
 
-... will deliver files to each of the `data/artifacts/`, `data/experiments/`, and `data/raw/` directories. The files in the base distribution are selected as a representative and interesting slices of the overall video repository.
+This syncs distribution files into `data/artifacts/` and `data/experiments/`. Distribution 1 includes only selected outputs from the larger Experiment 3 overnight parameter sweep: runs 09, 11, and 16, plus the summary figure and metric tables. The full overnight sweep can remain available in the data bucket as an archive without being part of the default download.
 
 ### Organization
 

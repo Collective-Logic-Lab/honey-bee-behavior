@@ -39,3 +39,6 @@ data/experiments/*
 
 # A no-sync folder
 data/no-sync/**
+
+# Local distribution staging output
+distribution-1/
