@@ -68,6 +68,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-mask-height", type=int, default=72)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--concat-video", action="store_true")
+    parser.add_argument(
+        "--safeword-file",
+        type=Path,
+        default=Path(".safeword"),
+        help=(
+            "Stop cleanly if this file contains 'sea cucumber' or 'seacucubmer' "
+            "case-insensitively. Checked between samples."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -141,6 +150,16 @@ def concat_videos(out_dir: Path, rows: list[dict]) -> Path | None:
     return out_video
 
 
+def safeword_triggered(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        text = path.read_text(errors="ignore").casefold()
+    except OSError:
+        return False
+    return "sea cucumber" in text or "seacucubmer" in text
+
+
 def write_metadata(
     path: Path,
     args: argparse.Namespace,
@@ -150,6 +169,8 @@ def write_metadata(
     effective_duration_frames: int,
     rows: list[dict],
     concatenated_video: Path | None,
+    safeword_file: Path,
+    stopped_by_safeword: bool,
 ) -> None:
     completed = [row for row in rows if row["status"] == "done"]
     metadata = {
@@ -183,6 +204,8 @@ def write_metadata(
         "top_mask_height": args.top_mask_height,
         "overwrite": args.overwrite,
         "concat_video": args.concat_video,
+        "safeword_file": str(safeword_file),
+        "stopped_by_safeword": stopped_by_safeword,
         "manifest": str(out_dir / "samples_manifest.csv"),
         "completed_sample_count": len(completed),
         "concatenated_video": str(concatenated_video) if concatenated_video is not None else None,
@@ -195,6 +218,9 @@ def main() -> None:
     video = args.video.expanduser().resolve()
     out_dir = args.out.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    safeword_file = args.safeword_file.expanduser()
+    if not safeword_file.is_absolute():
+        safeword_file = Path.cwd() / safeword_file
 
     if args.sample_frames < args.window_frames:
         raise ValueError("--sample-frames must be at least --window-frames")
@@ -218,7 +244,12 @@ def main() -> None:
     starts = sample_starts(args.start_frame, effective_duration, args.sample_frames, args.sample_count)
     script = Path(__file__).with_name("annotate_motion_regimes.py")
     rows = []
+    stopped_by_safeword = False
     for sample_index, start in enumerate(starts):
+        if safeword_triggered(safeword_file):
+            print(f"safeword detected before sample {sample_index}; stopping", flush=True)
+            stopped_by_safeword = True
+            break
         sample_out = out_dir / f"sample_{sample_index:03d}_frame_{start:07d}"
         features = sample_out / "motion_regime_features.csv"
         overlay = sample_out / "motion_regime_overlay.mp4"
@@ -292,6 +323,10 @@ def main() -> None:
             }
         )
         write_manifest(out_dir / "samples_manifest.csv", rows)
+        if safeword_triggered(safeword_file):
+            print(f"safeword detected after sample {sample_index}; stopping", flush=True)
+            stopped_by_safeword = True
+            break
 
     concatenated_video = concat_videos(out_dir, rows) if args.concat_video else None
     write_metadata(
@@ -303,6 +338,8 @@ def main() -> None:
         effective_duration,
         rows,
         concatenated_video,
+        safeword_file,
+        stopped_by_safeword,
     )
     print(f"wrote manifest: {out_dir / 'samples_manifest.csv'}")
     print(f"wrote metadata: {out_dir / 'metadata.json'}")
