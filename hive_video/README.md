@@ -1,10 +1,26 @@
 ## Hive Video
 
-This directory is home to tools for pre-processing and analysis of honey bee hive video data. Here, we are working with data from "Videos for honey bee lifetime tracking data 2019" published by Smith, et al. (2019) with a referenced related article by Neubauer et al. (2023), "Honey Bee Drones Are Synchronously Hyperactive inside the Nest." DOIs are [10.17617/3.LLWRWR](https://doi.org/10.17617/3.LLWRWR) (dataset) and [10.1016/j.anbehav.2023.05.018](https://doi.org/10.1016/j.anbehav.2023.05.018) (paper).
+Honey bee hives are busy, layered, and difficult to read frame by frame. This folder contains tools for turning long hive videos into research-friendly artifacts: resequenced videos, motion-regime overlays, experiment outputs, and notebooks for reviewing collective behavior in the hive.
+
+The current work focuses on comb-building and festoon-related behavior in the "Videos for honey bee lifetime tracking data 2019" dataset published by Smith et al. (2019), with related context from Neubauer et al. (2023), "Honey Bee Drones Are Synchronously Hyperactive inside the Nest." DOIs: [10.17617/3.LLWRWR](https://doi.org/10.17617/3.LLWRWR) for the dataset and [10.1016/j.anbehav.2023.05.018](https://doi.org/10.1016/j.anbehav.2023.05.018) for the paper.
+
+### TLDR
+
+Run this from the repository root to set up the video tools:
+
+```bash
+cd hive_video
+uv venv
+source .venv/bin/activate
+uv sync
+uv run python get_dist_1.py
+```
+
+Then open `docs/experiments.ipynb`. The repository already includes a small five second sample video, and `get_dist_1.py` downloads the larger resequenced video artifact plus selected experiment outputs used by the notebook.
 
 ### Getting started
 
-To get started, you'll typically clone the overall repository. **Important note:** for working with the Video tools, it will be by far the most convenient to set the working directory to `./hive_video`. We recommend the use of a virtual environment for development, and this documentation is written assuming the use of `uv` for managing dependencies.
+To get started, clone the overall repository and work from `./hive_video`. We recommend a virtual environment, and this documentation assumes `uv` for dependency management.
 
 An example path might be:
 
@@ -17,7 +33,8 @@ uv venv
 source .venv/bin/activate
 uv sync
 ```
-... the packages and the data acquisition scripts should now be ready to use.
+
+The packages and data acquisition scripts should now be ready to use.
 
 The project ships with a small amount of seed data in the `hive_video/data/` directory. A five second sample video is included in `data/raw/start04_sample_5s.mp4`, and `data/experiments/experiment_example_5s/` contains the output of a sample pipeline run on that video. Larger artifacts are distributed separately.
 
