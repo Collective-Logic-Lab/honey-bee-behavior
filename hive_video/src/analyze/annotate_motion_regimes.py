@@ -166,6 +166,11 @@ def parse_args() -> argparse.Namespace:
             "the annotation text. Use this to cover existing captions on resequenced videos."
         ),
     )
+    parser.add_argument(
+        "--overlay-title",
+        default="",
+        help="Short condition label drawn on the overlay for side-by-side review.",
+    )
     return parser.parse_args()
 
 
@@ -676,6 +681,7 @@ def draw_overlay(
     grid_cols: int,
     min_active_fraction: float,
     top_mask_height: int,
+    overlay_title: str,
 ) -> None:
     by_window: dict[int, list[tuple[CellFeature, int, float]]] = {}
     for feature, label, prob_row in zip(features, labels, probs, strict=True):
@@ -729,19 +735,41 @@ def draw_overlay(
             mask_height = min(top_mask_height, scale_height)
             cv2.rectangle(frame, (0, 0), (scale_width, mask_height), (0, 0, 0), thickness=-1)
             margin = 12
-            (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+            title = overlay_title.strip()
+            lines = [text, title] if title else [text]
+            line_metrics = [cv2.getTextSize(line, font, font_scale, thickness) for line in lines]
             max_width = max(1, scale_width - 2 * margin)
             scale = font_scale
-            if text_width > max_width:
-                scale *= max_width / text_width
-                (text_width, text_height), baseline = cv2.getTextSize(text, font, scale, thickness)
-            text_x = max(margin, (scale_width - text_width) // 2)
-            text_y = max(text_height + margin, (mask_height + text_height) // 2 - baseline)
+            widest = max(metric[0][0] for metric in line_metrics)
+            if widest > max_width:
+                scale *= max_width / widest
+                line_metrics = [cv2.getTextSize(line, font, scale, thickness) for line in lines]
+            line_gap = 6 if len(lines) > 1 else 0
+            total_height = sum(metric[0][1] + metric[1] for metric in line_metrics) + line_gap
+            y = max(margin, (mask_height - total_height) // 2)
+            for line, ((line_width, line_height), baseline) in zip(lines, line_metrics, strict=True):
+                x = max(margin, (scale_width - line_width) // 2)
+                y += line_height
+                cv2.putText(frame, line, (x, y), font, scale, (255, 255, 255), thickness)
+                y += baseline + line_gap
+            writer.write(frame)
+            continue
         else:
             scale = font_scale
             text_x = 16
             text_y = 32
         cv2.putText(frame, text, (text_x, text_y), font, scale, (255, 255, 255), thickness)
+        if overlay_title.strip():
+            title = overlay_title.strip()
+            margin = 16
+            title_scale = 0.52
+            (title_width, title_height), baseline = cv2.getTextSize(title, font, title_scale, thickness)
+            max_width = max(1, scale_width - 2 * margin)
+            if title_width > max_width:
+                title_scale *= max_width / title_width
+                (title_width, title_height), baseline = cv2.getTextSize(title, font, title_scale, thickness)
+            title_y = scale_height - margin
+            cv2.putText(frame, title, (margin, title_y), font, title_scale, (255, 255, 255), thickness)
         writer.write(frame)
     writer.release()
     cap.release()
@@ -795,6 +823,7 @@ def main() -> None:
         args.grid_cols,
         args.min_active_fraction,
         args.top_mask_height,
+        args.overlay_title,
     )
     metadata = {
         "analysis_version": ANALYSIS_VERSION,
@@ -819,6 +848,7 @@ def main() -> None:
         "feature_set": args.feature_set,
         "feature_names": feature_names,
         "top_mask_height": args.top_mask_height,
+        "overlay_title": args.overlay_title,
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"wrote features: {out_dir / 'motion_regime_features.csv'}")

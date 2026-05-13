@@ -66,6 +66,7 @@ def parse_args() -> argparse.Namespace:
         default="full",
     )
     parser.add_argument("--top-mask-height", type=int, default=72)
+    parser.add_argument("--overlay-title", default="")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--concat-video", action="store_true")
     parser.add_argument(
@@ -202,6 +203,7 @@ def write_metadata(
         "velocity_transform": args.velocity_transform,
         "feature_set": args.feature_set,
         "top_mask_height": args.top_mask_height,
+        "overlay_title": args.overlay_title,
         "overwrite": args.overwrite,
         "concat_video": args.concat_video,
         "safeword_file": str(safeword_file),
@@ -303,6 +305,8 @@ def main() -> None:
                 args.feature_set,
                 "--top-mask-height",
                 str(args.top_mask_height),
+                "--overlay-title",
+                args.overlay_title,
             ]
             print(
                 f"running sample {sample_index}: start={start:,} "
