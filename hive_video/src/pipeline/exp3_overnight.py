@@ -107,7 +107,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data/artifacts/resequenced/reseq_1_start04__20190609_175013_side0_top.mp4"),
     )
-    parser.add_argument("--out-root", type=Path, default=Path("data/qc/exp3_overnight"))
+    parser.add_argument("--out-root", type=Path, default=Path("data/experiments/exp3_overnight"))
     parser.add_argument("--safeword-file", type=Path, default=Path(".safeword"))
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()

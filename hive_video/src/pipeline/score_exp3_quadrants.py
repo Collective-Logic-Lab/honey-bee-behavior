@@ -18,8 +18,14 @@ def parse_args() -> argparse.Namespace:
             "quadrants for sample runs at a target frame."
         )
     )
-    parser.add_argument("--root", type=Path, default=Path("data/qc/exp3_overnight"))
+    parser.add_argument("--root", type=Path, default=Path("data/experiments/exp3_overnight"))
     parser.add_argument("--target-frame", type=int, default=87950)
+    parser.add_argument(
+        "--exclude-top-pixels",
+        type=float,
+        default=72.0,
+        help="Exclude feature cells whose y_center falls inside this top caption band.",
+    )
     parser.add_argument("--out", type=Path, default=None)
     return parser.parse_args()
 
@@ -76,7 +82,10 @@ def selected_rows(rows: list[dict], target_frame: int) -> tuple[list[dict], list
     return containing, nearest, nearest_mid
 
 
-def score(rows: list[dict]) -> dict | None:
+def score(rows: list[dict], exclude_top_pixels: float) -> dict | None:
+    if not rows:
+        return None
+    rows = [row for row in rows if float(row["y_center"]) >= exclude_top_pixels]
     if not rows:
         return None
     max_col = max(int(row["cell_col"]) for row in rows)
@@ -145,7 +154,7 @@ def main() -> None:
         containing, nearest, nearest_mid = selected_rows(rows, args.target_frame)
         metadata = load_json(run_dir / "metadata.json")
         for kind, selected in (("containing", containing), ("nearest_mid", nearest)):
-            metric = score(selected)
+            metric = score(selected, args.exclude_top_pixels)
             if metric is None:
                 continue
             rows_out.append(
@@ -153,6 +162,7 @@ def main() -> None:
                     "run": run_dir.name,
                     "metric_kind": kind,
                     "target_frame": args.target_frame,
+                    "exclude_top_pixels": args.exclude_top_pixels,
                     "nearest_frame_mid": nearest_mid,
                     "nearest_mid_abs_diff": abs(nearest_mid - args.target_frame)
                     if nearest_mid is not None
@@ -176,6 +186,7 @@ def main() -> None:
         "run",
         "metric_kind",
         "target_frame",
+        "exclude_top_pixels",
         "nearest_frame_mid",
         "nearest_mid_abs_diff",
         "selected_window_count",
