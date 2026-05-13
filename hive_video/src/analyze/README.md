@@ -23,6 +23,11 @@ The current analysis tools are:
    Run `annotate_motion_regimes.py` over long frame ranges as restartable
    chunks. `run_analysis.py` can call this runner for chunked presets.
 
+4. `run_motion_regime_samples.py`
+   Run `annotate_motion_regimes.py` on evenly spaced short samples from a
+   larger frame span. Use this for parameter checks that need broad coverage
+   without processing the full video.
+
 ### Presets
 
 `run_analysis.py` records the preset, resolved parameters, command, git commit,
@@ -53,6 +58,15 @@ uv run python src/analyze/run_analysis.py \
   --out data/qc/example_5s_beginner_grid16 \
   --set grid_rows=16 \
   --set grid_cols=16
+```
+
+Sampled presets use the same override pattern:
+
+```bash
+uv run python src/analyze/run_analysis.py \
+  exp3_sampler \
+  --video data/artifacts/resequenced/reseq_1_start04__20190609_175013_side0_top.mp4 \
+  --out data/qc/exp3_sampler
 ```
 
 ### Raw Instrumentation
@@ -120,6 +134,19 @@ For long videos, use `run_motion_regime_chunks.py`. It writes:
 Long chunked runs check `.safeword` between chunks. If `.safeword` contains
 `sea cucumber` or `seacucubmer`, the run stops cleanly and can be resumed by
 removing the file and rerunning the same command.
+
+### Sampled Runs
+
+For broad parameter checks, use `run_motion_regime_samples.py` or a sampled
+preset such as `exp3_sampler`. It distributes short samples evenly over a
+requested frame span and writes:
+
+- `samples_manifest.csv`
+- one output directory per sample
+- sample-level `motion_regime_features.csv`
+- sample-level `motion_regime_overlay.mp4`
+- run-level `metadata.json`
+- optional `motion_regime_overlay_all_samples.mp4`
 
 ### Outputs
 

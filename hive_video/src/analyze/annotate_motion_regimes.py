@@ -174,9 +174,16 @@ def read_frames(video: Path, start_frame: int, duration_frames: int, width: int)
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video: {video}")
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     source_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     source_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     height = max(1, round(width * source_height / source_width))
+    if frame_count and start_frame >= frame_count:
+        cap.release()
+        raise RuntimeError(
+            f"Start frame {start_frame:,} is past the end of the video "
+            f"({frame_count:,} frames)."
+        )
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     frames: list[np.ndarray] = []
@@ -188,6 +195,15 @@ def read_frames(video: Path, start_frame: int, duration_frames: int, width: int)
         gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
         frames.append(gray)
     cap.release()
+    if len(frames) < duration_frames:
+        requested_stop = start_frame + duration_frames
+        actual_stop = start_frame + len(frames)
+        print(
+            f"reached end of video after {len(frames):,} frames "
+            f"(requested frames {start_frame:,}..{requested_stop:,}; "
+            f"read through {actual_stop:,})",
+            flush=True,
+        )
     if len(frames) < 2:
         raise RuntimeError("Need at least two frames for optical flow.")
     return frames, fps

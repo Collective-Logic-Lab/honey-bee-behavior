@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run motion-regime annotation over a long video range in resumable chunks."""
+"""Run motion-regime annotation on evenly spaced short samples."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from _version import ANALYSIS_VERSION
 
@@ -19,17 +20,24 @@ from _version import ANALYSIS_VERSION
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run annotate_motion_regimes.py over a long frame range as smaller chunks. "
-            "This avoids holding the full video range and optical-flow stack in memory."
+            "Run annotate_motion_regimes.py on evenly spaced short frame samples. "
+            "This is intended for parameter sweeps that need broad video coverage "
+            "without processing the full video."
         )
     )
     parser.add_argument("video", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--start-frame", type=int, default=0)
-    parser.add_argument("--duration-frames", type=int, required=True)
-    parser.add_argument("--chunk-frames", type=int, default=9000)
+    parser.add_argument(
+        "--duration-frames",
+        type=int,
+        required=True,
+        help="Frame span over which samples are distributed.",
+    )
+    parser.add_argument("--sample-count", type=int, default=10)
+    parser.add_argument("--sample-frames", type=int, default=250)
     parser.add_argument("--window-frames", type=int, default=125)
-    parser.add_argument("--stride-frames", type=int, default=25)
+    parser.add_argument("--stride-frames", type=int, default=1)
     parser.add_argument("--grid-rows", type=int, default=32)
     parser.add_argument("--grid-cols", type=int, default=32)
     parser.add_argument("--clusters", type=int, default=8)
@@ -40,13 +48,13 @@ def parse_args() -> argparse.Namespace:
         default="diag",
     )
     parser.add_argument("--gmm-reg-covar", type=float, default=1e-4)
-    parser.add_argument("--pca-components", type=int, default=8)
-    parser.add_argument("--flow-scale-width", type=int, default=412)
+    parser.add_argument("--pca-components", type=int, default=0)
+    parser.add_argument("--flow-scale-width", type=int, default=824)
     parser.add_argument("--activity-threshold", type=float, default=0.30)
     parser.add_argument("--min-active-fraction", type=float, default=0.005)
     parser.add_argument("--random-state", type=int, default=0)
-    parser.add_argument("--angular-feature-weight", type=float, default=1.0)
-    parser.add_argument("--neighbor-feature-weight", type=float, default=1.0)
+    parser.add_argument("--angular-feature-weight", type=float, default=2.0)
+    parser.add_argument("--neighbor-feature-weight", type=float, default=1.5)
     parser.add_argument(
         "--velocity-transform",
         choices=("raw", "log1p", "sqrt", "asinh"),
@@ -57,31 +65,40 @@ def parse_args() -> argparse.Namespace:
         choices=("full", "exp1", "velocity", "beginner"),
         default="full",
     )
-    parser.add_argument(
-        "--top-mask-height",
-        type=int,
-        default=0,
-        help="Opaque black band, in output pixels, drawn across the top of chunk overlays.",
-    )
+    parser.add_argument("--top-mask-height", type=int, default=72)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--concat-video", action="store_true")
-    parser.add_argument(
-        "--safeword-file",
-        type=Path,
-        default=Path(".safeword"),
-        help=(
-            "Stop cleanly if this file contains 'sea cucumber' or 'seacucubmer' "
-            "case-insensitively. Checked between chunks."
-        ),
-    )
     return parser.parse_args()
+
+
+def probe_frame_count(video: Path) -> int:
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video}")
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    cap.release()
+    return frame_count
+
+
+def sample_starts(start_frame: int, duration_frames: int, sample_frames: int, sample_count: int) -> list[int]:
+    if sample_count <= 0:
+        raise ValueError("--sample-count must be positive")
+    if sample_frames <= 0:
+        raise ValueError("--sample-frames must be positive")
+    if duration_frames < sample_frames:
+        return [start_frame]
+    last_start = start_frame + duration_frames - sample_frames
+    if sample_count == 1:
+        return [start_frame + (last_start - start_frame) // 2]
+    starts = np.linspace(start_frame, last_start, sample_count)
+    return sorted({int(round(value)) for value in starts})
 
 
 def write_manifest(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         fieldnames = [
-            "chunk_index",
+            "sample_index",
             "start_frame",
             "duration_frames",
             "out_dir",
@@ -98,12 +115,12 @@ def concat_videos(out_dir: Path, rows: list[dict]) -> Path | None:
     ready = [Path(row["overlay_mp4"]) for row in rows if row["status"] == "done"]
     if not ready:
         return None
-    list_path = out_dir / "overlay_concat_list.txt"
+    list_path = out_dir / "sample_overlay_concat_list.txt"
     with list_path.open("w") as f:
         for path in ready:
             escaped = str(path).replace("'", "'\\''")
             f.write(f"file '{escaped}'\n")
-    out_video = out_dir / "motion_regime_overlay_all_chunks.mp4"
+    out_video = out_dir / "motion_regime_overlay_all_samples.mp4"
     cmd = [
         "ffmpeg",
         "-y",
@@ -119,44 +136,22 @@ def concat_videos(out_dir: Path, rows: list[dict]) -> Path | None:
         "copy",
         str(out_video),
     ]
-    print(f"concatenating overlays: {out_video}", flush=True)
+    print(f"concatenating sample overlays: {out_video}", flush=True)
     subprocess.run(cmd, check=True)
     return out_video
 
 
-def safeword_triggered(path: Path) -> bool:
-    if not path.exists():
-        return False
-    try:
-        text = path.read_text(errors="ignore").casefold()
-    except OSError:
-        return False
-    return "sea cucumber" in text or "seacucubmer" in text
-
-
-def probe_frame_count(video: Path) -> int:
-    cap = cv2.VideoCapture(str(video))
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open video: {video}")
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    cap.release()
-    return frame_count
-
-
-def write_run_metadata(
+def write_metadata(
     path: Path,
     args: argparse.Namespace,
     video: Path,
     out_dir: Path,
-    safeword_file: Path,
-    chunks: list[dict],
-    concatenated_video: Path | None,
-    stopped_by_safeword: bool,
     video_frame_count: int,
     effective_duration_frames: int,
-    processed_duration_frames: int,
+    rows: list[dict],
+    concatenated_video: Path | None,
 ) -> None:
-    completed = [row for row in chunks if row["status"] == "done"]
+    completed = [row for row in rows if row["status"] == "done"]
     metadata = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "analysis_version": ANALYSIS_VERSION,
@@ -166,8 +161,8 @@ def write_run_metadata(
         "start_frame": args.start_frame,
         "duration_frames": args.duration_frames,
         "effective_duration_frames": effective_duration_frames,
-        "processed_duration_frames": processed_duration_frames,
-        "chunk_frames": args.chunk_frames,
+        "sample_count": args.sample_count,
+        "sample_frames": args.sample_frames,
         "window_frames": args.window_frames,
         "stride_frames": args.stride_frames,
         "grid_rows": args.grid_rows,
@@ -188,11 +183,8 @@ def write_run_metadata(
         "top_mask_height": args.top_mask_height,
         "overwrite": args.overwrite,
         "concat_video": args.concat_video,
-        "safeword_file": str(safeword_file),
-        "stopped_by_safeword": stopped_by_safeword,
-        "chunk_count": len(chunks),
-        "completed_chunk_count": len(completed),
-        "chunks_manifest": str(out_dir / "chunks_manifest.csv"),
+        "manifest": str(out_dir / "samples_manifest.csv"),
+        "completed_sample_count": len(completed),
         "concatenated_video": str(concatenated_video) if concatenated_video is not None else None,
     }
     path.write_text(json.dumps(metadata, indent=2) + "\n")
@@ -204,76 +196,46 @@ def main() -> None:
     out_dir = args.out.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    script = Path(__file__).with_name("annotate_motion_regimes.py")
-    safeword_file = args.safeword_file.expanduser()
-    if not safeword_file.is_absolute():
-        safeword_file = Path.cwd() / safeword_file
-    chunks = []
+    if args.sample_frames < args.window_frames:
+        raise ValueError("--sample-frames must be at least --window-frames")
+
     frame_count = probe_frame_count(video)
     if frame_count and args.start_frame >= frame_count:
-        print(
-            f"start frame {args.start_frame:,} is past video end "
-            f"({frame_count:,} frames); no chunks to run",
-            flush=True,
-        )
-        remaining = 0
-    elif frame_count:
+        raise ValueError(f"start frame {args.start_frame:,} is past video end ({frame_count:,} frames)")
+
+    if frame_count:
         available = frame_count - args.start_frame
-        remaining = min(args.duration_frames, available)
-        if remaining < args.duration_frames:
-            requested_stop = args.start_frame + args.duration_frames
-            effective_stop = args.start_frame + remaining
+        effective_duration = min(args.duration_frames, available)
+        if effective_duration < args.duration_frames:
             print(
-                f"requested range extends past video end "
-                f"({args.start_frame:,}..{requested_stop:,}); "
-                f"processing available range {args.start_frame:,}..{effective_stop:,}",
+                f"requested sample span extends past video end; "
+                f"using {effective_duration:,} available frames",
                 flush=True,
             )
     else:
-        remaining = args.duration_frames
-    if remaining and remaining < args.window_frames:
-        print(
-            f"available range has {remaining:,} frames, fewer than "
-            f"window_frames={args.window_frames:,}; no chunks to run",
-            flush=True,
-        )
-        remaining = 0
-    start = args.start_frame
-    chunk_index = 0
-    stopped_by_safeword = False
-    effective_duration_frames = remaining
-    processed_duration_frames = 0
-    while remaining > 0:
-        if safeword_triggered(safeword_file):
-            print(f"safeword detected before chunk {chunk_index}; stopping cleanly", flush=True)
-            stopped_by_safeword = True
-            break
-        duration = min(args.chunk_frames, remaining)
-        if duration < args.window_frames:
-            print(
-                f"skipping final {duration:,}-frame tail because it is shorter than "
-                f"window_frames={args.window_frames:,}",
-                flush=True,
-            )
-            break
-        chunk_out = out_dir / f"chunk_{chunk_index:04d}_frame_{start:07d}"
-        features = chunk_out / "motion_regime_features.csv"
-        overlay = chunk_out / "motion_regime_overlay.mp4"
-        status = "pending"
+        effective_duration = args.duration_frames
+
+    starts = sample_starts(args.start_frame, effective_duration, args.sample_frames, args.sample_count)
+    script = Path(__file__).with_name("annotate_motion_regimes.py")
+    rows = []
+    for sample_index, start in enumerate(starts):
+        sample_out = out_dir / f"sample_{sample_index:03d}_frame_{start:07d}"
+        features = sample_out / "motion_regime_features.csv"
+        overlay = sample_out / "motion_regime_overlay.mp4"
         if features.exists() and overlay.exists() and not args.overwrite:
             status = "done"
-            print(f"skipping existing chunk {chunk_index}: {chunk_out}", flush=True)
+            print(f"skipping existing sample {sample_index}: {sample_out}", flush=True)
         else:
             cmd = [
                 sys.executable,
                 str(script),
                 str(video),
                 "--out",
-                str(chunk_out),
+                str(sample_out),
                 "--start-frame",
                 str(start),
                 "--duration-frames",
-                str(duration),
+                str(args.sample_frames),
                 "--window-frames",
                 str(args.window_frames),
                 "--stride-frames",
@@ -312,49 +274,37 @@ def main() -> None:
                 str(args.top_mask_height),
             ]
             print(
-                f"running chunk {chunk_index}: start={start:,} duration={duration:,} out={chunk_out}",
+                f"running sample {sample_index}: start={start:,} "
+                f"duration={args.sample_frames:,} out={sample_out}",
                 flush=True,
             )
             subprocess.run(cmd, check=True)
             status = "done"
-
-        chunks.append(
+        rows.append(
             {
-                "chunk_index": chunk_index,
+                "sample_index": sample_index,
                 "start_frame": start,
-                "duration_frames": duration,
-                "out_dir": str(chunk_out),
+                "duration_frames": args.sample_frames,
+                "out_dir": str(sample_out),
                 "features_csv": str(features),
                 "overlay_mp4": str(overlay),
                 "status": status,
             }
         )
-        if status == "done":
-            processed_duration_frames += duration
-        write_manifest(out_dir / "chunks_manifest.csv", chunks)
-        if safeword_triggered(safeword_file):
-            print(f"safeword detected after chunk {chunk_index}; stopping cleanly", flush=True)
-            stopped_by_safeword = True
-            break
-        start += duration
-        remaining -= duration
-        chunk_index += 1
+        write_manifest(out_dir / "samples_manifest.csv", rows)
 
-    concatenated_video = concat_videos(out_dir, chunks) if args.concat_video else None
-    write_run_metadata(
+    concatenated_video = concat_videos(out_dir, rows) if args.concat_video else None
+    write_metadata(
         out_dir / "metadata.json",
         args,
         video,
         out_dir,
-        safeword_file,
-        chunks,
-        concatenated_video,
-        stopped_by_safeword,
         frame_count,
-        effective_duration_frames,
-        processed_duration_frames,
+        effective_duration,
+        rows,
+        concatenated_video,
     )
-    print(f"wrote manifest: {out_dir / 'chunks_manifest.csv'}")
+    print(f"wrote manifest: {out_dir / 'samples_manifest.csv'}")
     print(f"wrote metadata: {out_dir / 'metadata.json'}")
 
 

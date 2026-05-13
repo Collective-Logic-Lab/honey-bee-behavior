@@ -165,6 +165,127 @@ PRESETS: dict[str, dict] = {
             "concat_video": True,
         },
     },
+    "exp3_reseq_long_w824_ang2_neighbor1p5_v0p1": {
+        "description": "Experiment 3 long resequenced-video run with angular and neighbor features emphasized.",
+        "runner": "chunks",
+        "params": {
+            "start_frame": 14500,
+            "duration_frames": 180000,
+            "chunk_frames": 9000,
+            "window_frames": 125,
+            "stride_frames": 25,
+            "grid_rows": 32,
+            "grid_cols": 32,
+            "clusters": 8,
+            "method": "gmm",
+            "gmm_covariance_type": "diag",
+            "gmm_reg_covar": 1e-4,
+            "pca_components": 8,
+            "flow_scale_width": 824,
+            "feature_set": "full",
+            "velocity_transform": "raw",
+            "angular_feature_weight": 2.0,
+            "neighbor_feature_weight": 1.5,
+            "top_mask_height": 72,
+            "concat_video": True,
+        },
+    },
+    "exp3_reseq_matched_30s_w824_ang2_neighbor1p5_v0p1": {
+        "description": "Experiment 3 short resequenced-video test around the mapped clear source-video example.",
+        "runner": "direct",
+        "params": {
+            "start_frame": 101125,
+            "duration_frames": 750,
+            "window_frames": 125,
+            "stride_frames": 25,
+            "grid_rows": 32,
+            "grid_cols": 32,
+            "clusters": 8,
+            "method": "gmm",
+            "gmm_covariance_type": "diag",
+            "gmm_reg_covar": 1e-4,
+            "pca_components": 8,
+            "flow_scale_width": 824,
+            "feature_set": "full",
+            "velocity_transform": "raw",
+            "angular_feature_weight": 2.0,
+            "neighbor_feature_weight": 1.5,
+            "top_mask_height": 72,
+        },
+    },
+    "exp3_reseq_matched_1min_w824_ang2_neighbor1p5_v0p1": {
+        "description": "Experiment 3 one-minute resequenced-video review pass around the mapped clear source-video example.",
+        "runner": "direct",
+        "params": {
+            "start_frame": 0,
+            "duration_frames": 100000,
+            "window_frames": 125,
+            "stride_frames": 10,
+            "grid_rows": 32,
+            "grid_cols": 32,
+            "clusters": 8,
+            "method": "gmm",
+            "gmm_covariance_type": "diag",
+            "gmm_reg_covar": 1e-4,
+            "pca_components": 8,
+            "flow_scale_width": 824,
+            "feature_set": "full",
+            "velocity_transform": "raw",
+            "angular_feature_weight": 2.0,
+            "neighbor_feature_weight": 1.5,
+            "top_mask_height": 72,
+        },
+    },
+    "exp3_reseq_full_w824_ang2_neighbor1p5_v0p1": {
+        "description": "Experiment 3 full resequenced-video run with the legacy angular/neighbor-weighted settings.",
+        "runner": "chunks",
+        "params": {
+            "start_frame": 0,
+            "duration_frames": 10000,
+            "window_frames": 125,
+            "stride_frames": 25,
+            "grid_rows": 64,
+            "grid_cols": 64,
+            "clusters": 8,
+            "method": "gmm",
+            "gmm_covariance_type": "diag",
+            "gmm_reg_covar": 1e-4,
+            "pca_components": 0,
+            "flow_scale_width": 824,
+            "feature_set": "full",
+            "velocity_transform": "raw",
+            "angular_feature_weight": 2.0,
+            "neighbor_feature_weight": 1.5,
+            "top_mask_height": 72,
+            "concat_video": True,
+        },
+    },
+    "exp3_sampler": {
+        "description": "Experiment 3 sampled resequenced-video parameter probe.",
+        "runner": "samples",
+        "params": {
+            "start_frame": 0,
+            "duration_frames": 263474,
+            "sample_count": 10,
+            "sample_frames": 250,
+            "window_frames": 125,
+            "stride_frames": 1,
+            "grid_rows": 32,
+            "grid_cols": 32,
+            "clusters": 8,
+            "method": "gmm",
+            "gmm_covariance_type": "diag",
+            "gmm_reg_covar": 1e-4,
+            "pca_components": 0,
+            "flow_scale_width": 824,
+            "feature_set": "full",
+            "velocity_transform": "raw",
+            "angular_feature_weight": 2.0,
+            "neighbor_feature_weight": 1.5,
+            "top_mask_height": 72,
+            "concat_video": True,
+        },
+    },
     "exp4_reseq_full_highres_v0p1": {
         "description": "Full resequenced-video velocity-compressed high-resolution group-motion run.",
         "runner": "chunks",
@@ -212,6 +333,8 @@ CLI_NAMES = {
     "overwrite": "--overwrite",
     "pca_components": "--pca-components",
     "random_state": "--random-state",
+    "sample_count": "--sample-count",
+    "sample_frames": "--sample-frames",
     "safeword_file": "--safeword-file",
     "start_frame": "--start-frame",
     "stride_frames": "--stride-frames",
@@ -247,6 +370,32 @@ RUNNER_KEYS = {
         "window_frames",
     },
     "chunks": set(CLI_NAMES),
+    "samples": {
+        "activity_threshold",
+        "angular_feature_weight",
+        "clusters",
+        "concat_video",
+        "duration_frames",
+        "feature_set",
+        "flow_scale_width",
+        "gmm_covariance_type",
+        "gmm_reg_covar",
+        "grid_cols",
+        "grid_rows",
+        "method",
+        "min_active_fraction",
+        "neighbor_feature_weight",
+        "overwrite",
+        "pca_components",
+        "random_state",
+        "sample_count",
+        "sample_frames",
+        "start_frame",
+        "stride_frames",
+        "top_mask_height",
+        "velocity_transform",
+        "window_frames",
+    },
 }
 
 
@@ -254,7 +403,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Run named analysis presets. Presets are thin wrappers around "
-            "annotate_motion_regimes.py or run_motion_regime_chunks.py."
+            "annotate_motion_regimes.py, run_motion_regime_chunks.py, "
+            "or run_motion_regime_samples.py."
         )
     )
     parser.add_argument("preset", choices=sorted(PRESETS))
@@ -262,7 +412,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--runner",
-        choices=("preset", "direct", "chunks"),
+        choices=("preset", "direct", "chunks", "samples"),
         default="preset",
         help="Override the preset runner. 'preset' uses the runner configured by the preset.",
     )
@@ -371,7 +521,12 @@ def main() -> None:
     params = {**preset["params"], **parse_overrides(args.overrides)}
     runner = preset["runner"] if args.runner == "preset" else args.runner
 
-    script_name = "annotate_motion_regimes.py" if runner == "direct" else "run_motion_regime_chunks.py"
+    script_names = {
+        "direct": "annotate_motion_regimes.py",
+        "chunks": "run_motion_regime_chunks.py",
+        "samples": "run_motion_regime_samples.py",
+    }
+    script_name = script_names[runner]
     script = Path(__file__).with_name(script_name)
     video = args.video.expanduser()
     out_dir = args.out.expanduser()
