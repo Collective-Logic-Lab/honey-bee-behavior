@@ -36,3 +36,6 @@ data/experiments/*
 
 # Always keep our pet experiment
 !data/experiments/experiment_example_5s/
+
+# A no-sync folder
+data/no-sync/**
