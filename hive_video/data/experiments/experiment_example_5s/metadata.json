@@ -1,0 +1,27 @@
+{
+  "video": "/Users/peterdresslar/workspace/honey-bee-behavior/hive_video/data/raw/start04_sample_5s.mp4",
+  "start_frame": 0,
+  "duration_frames": 125,
+  "fps": 25.0,
+  "window_frames": 25,
+  "stride_frames": 1,
+  "grid_rows": 12,
+  "grid_cols": 12,
+  "clusters": 4,
+  "method": "gmm",
+  "gmm_covariance_type": "diag",
+  "gmm_reg_covar": 0.0001,
+  "pca_components": 4,
+  "activity_threshold": 0.3,
+  "flow_scale_width": 412,
+  "angular_feature_weight": 1.0,
+  "neighbor_feature_weight": 1.0,
+  "velocity_transform": "raw",
+  "feature_set": "beginner",
+  "feature_names": [
+    "mean_speed",
+    "active_fraction",
+    "alignment",
+    "direction_concentration"
+  ]
+}
