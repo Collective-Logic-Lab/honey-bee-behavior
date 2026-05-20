@@ -284,6 +284,15 @@ def chunk_order(rows: list[dict], chunk_size: int) -> list[list[dict]]:
     return [rows[idx : idx + chunk_size] for idx in range(0, len(rows), chunk_size)]
 
 
+def segment_output_frame_count(segment: dict) -> int:
+    skip_frames = set(segment.get("skip_source_frame_indices", set()))
+    return sum(
+        1
+        for source_frame_idx in range(segment["start_frame_idx"], segment["end_frame_idx"] + 1)
+        if source_frame_idx not in skip_frames
+    )
+
+
 def write_parts_manifest(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -504,6 +513,20 @@ def main() -> None:
         raise RuntimeError(f"Could not open source video: {source_video}")
     source_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     source_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    reported_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if reported_frame_count > 0:
+        max_decodable_frame_idx = reported_frame_count - 2
+        for segment in segments.values():
+            if segment["end_frame_idx"] > max_decodable_frame_idx:
+                skip_frames = set(segment.get("skip_source_frame_indices", set()))
+                skip_frames.update(range(max_decodable_frame_idx + 1, segment["end_frame_idx"] + 1))
+                segment["skip_source_frame_indices"] = skip_frames
+                print(
+                    f"warning: segment {segment['segment_id']} includes nominal terminal frames "
+                    f"above decodable frame {max_decodable_frame_idx}; skipping "
+                    f"{len(skip_frames)} frame(s)",
+                    flush=True,
+                )
     out_width = args.scale_width
     out_height = round(out_width * source_height / source_width)
     if out_height % 2:
@@ -521,7 +544,8 @@ def main() -> None:
                 break
 
             part_frame_count = sum(
-                segments[int(order_row["segment_id"])]["duration_frames"] for order_row in part_order
+                segment_output_frame_count(segments[int(order_row["segment_id"])])
+                for order_row in part_order
             )
             part_video = parts_dir / f"part_{part_index:04d}.mp4"
             part_mapping = parts_dir / f"part_{part_index:04d}.frame_mapping.csv"
@@ -564,11 +588,21 @@ def main() -> None:
                             flush=True,
                         )
                         for source_frame_idx in range(segment["start_frame_idx"], segment["end_frame_idx"] + 1):
+                            if source_frame_idx in segment.get("skip_source_frame_indices", set()):
+                                print(
+                                    f"    skipping unavailable source frame {source_frame_idx}",
+                                    flush=True,
+                                )
+                                continue
                             if source_frame_idx == segment["start_frame_idx"]:
                                 cap.set(cv2.CAP_PROP_POS_FRAMES, source_frame_idx)
                             ok, frame = cap.read()
                             if not ok:
-                                raise RuntimeError(f"Could not read source frame {source_frame_idx}")
+                                print(
+                                    f"    warning: could not read source frame {source_frame_idx}; skipping",
+                                    flush=True,
+                                )
+                                continue
                             frame = cv2.resize(frame, (out_width, out_height), interpolation=cv2.INTER_AREA)
                             output_time_s = local_output_frame_idx / args.fps
                             source_time_s = source_frame_idx / args.fps

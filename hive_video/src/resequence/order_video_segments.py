@@ -132,6 +132,26 @@ def extract_frame(video: Path, frame_idx: int, fps: float, width: int, height: i
     raw = subprocess.check_output(cmd)
     expected = width * height
     if len(raw) != expected:
+        # Timestamp seeking can fail at the final frames of some MP4s. Fall back
+        # to exact frame selection before treating the frame as missing.
+        exact_cmd = [
+            "ffmpeg",
+            "-v",
+            "quiet",
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-vf",
+            f"select=eq(n\\,{frame_idx}),scale={width}:{height},format=gray",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "-",
+        ]
+        raw = subprocess.check_output(exact_cmd)
+    if len(raw) != expected:
         raise RuntimeError(f"Expected {expected} bytes for frame {frame_idx}, got {len(raw)}")
     return np.frombuffer(raw, dtype=np.uint8).astype(np.float32)
 
@@ -155,7 +175,16 @@ def segment_signature(
         frames = range(first, segment.end_frame_idx + 1)
     else:
         raise ValueError(which)
-    arrays = [extract_frame(segment.source_video, idx, fps, width, height) for idx in frames]
+    arrays = []
+    for idx in frames:
+        try:
+            arrays.append(extract_frame(segment.source_video, idx, fps, width, height))
+        except RuntimeError as error:
+            print(
+                f"warning: skipping unavailable frame {idx} for segment "
+                f"{segment.segment_id} {which}: {error}",
+                flush=True,
+            )
     if not arrays:
         raise RuntimeError(f"No frames available for segment {segment.segment_id} {which}")
     while len(arrays) < window_frames:
