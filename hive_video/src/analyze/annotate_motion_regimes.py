@@ -12,7 +12,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from sklearn.cluster import KMeans
+from sklearn.cluster import HDBSCAN, KMeans
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clusters", type=int, default=6)
     parser.add_argument(
         "--method",
-        choices=("gmm", "kmeans"),
+        choices=("gmm", "kmeans", "hdbscan"),
         default="gmm",
         help="Clustering method for cell-window features.",
     )
@@ -96,6 +96,30 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1e-4,
         help="Non-negative regularization added to GMM covariance diagonals.",
+    )
+    parser.add_argument(
+        "--hdbscan-min-cluster-size",
+        type=int,
+        default=50,
+        help=(
+            "Minimum HDBSCAN cluster size in cell-window feature rows. "
+            "Only used with --method hdbscan."
+        ),
+    )
+    parser.add_argument(
+        "--hdbscan-min-samples",
+        type=int,
+        default=0,
+        help=(
+            "HDBSCAN min_samples. Use 0 to let sklearn default to min_cluster_size. "
+            "Only used with --method hdbscan."
+        ),
+    )
+    parser.add_argument(
+        "--hdbscan-cluster-selection-epsilon",
+        type=float,
+        default=0.0,
+        help="HDBSCAN cluster-selection epsilon. Only used with --method hdbscan.",
     )
     parser.add_argument(
         "--pca-components",
@@ -164,6 +188,25 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Opaque black band, in output pixels, drawn across the top of the overlay before "
             "the annotation text. Use this to cover existing captions on resequenced videos."
+        ),
+    )
+    parser.add_argument(
+        "--display-label-hysteresis",
+        type=int,
+        default=0,
+        help=(
+            "Display-only temporal smoothing. A grid cell must keep a new cluster label for "
+            "this many consecutive rendered windows before its overlay color changes. "
+            "Use 0 or 1 to disable."
+        ),
+    )
+    parser.add_argument(
+        "--display-noise-hold-windows",
+        type=int,
+        default=0,
+        help=(
+            "Display-only temporal smoothing for HDBSCAN noise. Keep a cell's previous "
+            "non-noise overlay color through this many consecutive noise windows."
         ),
     )
     parser.add_argument(
@@ -253,27 +296,60 @@ def summarize_cell(
     x_slice: slice,
     flow_stack: np.ndarray,
     activity_threshold: float,
+    temporal_weights: np.ndarray | None = None,
 ) -> CellFeature:
     cell = flow_stack[:, y_slice, x_slice, :]
+    if temporal_weights is not None:
+        weights = temporal_weights.reshape((-1, 1, 1))
+        weights = weights / np.sum(weights)
+    else:
+        weights = None
     vx = cell[..., 0]
     vy = cell[..., 1]
     speed = np.sqrt(vx * vx + vy * vy)
     active = speed > activity_threshold
-    active_fraction = float(np.mean(active))
+    if weights is not None:
+        active_fraction = float(np.sum(active * weights) / active.shape[1] / active.shape[2])
+    else:
+        active_fraction = float(np.mean(active))
 
     if np.any(active):
-        mean_vx = float(np.mean(vx[active]))
-        mean_vy = float(np.mean(vy[active]))
-        active_speed = speed[active]
+        if weights is not None:
+            active_weights = np.broadcast_to(weights, active.shape)[active]
+            mean_vx = float(np.average(vx[active], weights=active_weights))
+            mean_vy = float(np.average(vy[active], weights=active_weights))
+            active_speed = speed[active]
+            active_speed_weights = active_weights
+        else:
+            mean_vx = float(np.mean(vx[active]))
+            mean_vy = float(np.mean(vy[active]))
+            active_speed = speed[active]
+            active_speed_weights = None
     else:
-        mean_vx = float(np.mean(vx))
-        mean_vy = float(np.mean(vy))
+        if weights is not None:
+            mean_vx = float(np.sum(vx * weights) / vx.shape[1] / vx.shape[2])
+            mean_vy = float(np.sum(vy * weights) / vy.shape[1] / vy.shape[2])
+            active_speed_weights = np.broadcast_to(weights, speed.shape).reshape(-1)
+        else:
+            mean_vx = float(np.mean(vx))
+            mean_vy = float(np.mean(vy))
+            active_speed_weights = None
         active_speed = speed.reshape(-1)
 
     safe_speed = np.where(speed > 1e-6, speed, 1.0)
     unit_x = vx / safe_speed
     unit_y = vy / safe_speed
-    alignment = float(np.sqrt(np.mean(unit_x[active]) ** 2 + np.mean(unit_y[active]) ** 2)) if np.any(active) else 0.0
+    if np.any(active):
+        if weights is not None:
+            active_weights = np.broadcast_to(weights, active.shape)[active]
+            mean_unit_x = np.average(unit_x[active], weights=active_weights)
+            mean_unit_y = np.average(unit_y[active], weights=active_weights)
+        else:
+            mean_unit_x = np.mean(unit_x[active])
+            mean_unit_y = np.mean(unit_y[active])
+        alignment = float(np.sqrt(mean_unit_x**2 + mean_unit_y**2))
+    else:
+        alignment = 0.0
 
     frame_mean_vx = np.mean(vx, axis=(1, 2))
     frame_mean_vy = np.mean(vy, axis=(1, 2))
@@ -281,8 +357,12 @@ def summarize_cell(
     frame_speeds = np.sqrt(frame_mean_vx * frame_mean_vx + frame_mean_vy * frame_mean_vy)
     moving = frame_speeds > activity_threshold
     if np.any(moving):
+        moving_weights = temporal_weights[moving] if temporal_weights is not None else None
         direction_concentration = float(
-            np.sqrt(np.mean(np.cos(frame_angles[moving])) ** 2 + np.mean(np.sin(frame_angles[moving])) ** 2)
+            np.sqrt(
+                np.average(np.cos(frame_angles[moving]), weights=moving_weights) ** 2
+                + np.average(np.sin(frame_angles[moving]), weights=moving_weights) ** 2
+            )
         )
     else:
         direction_concentration = 0.0
@@ -295,7 +375,10 @@ def summarize_cell(
         angular_sweep_std = 0.0
         angular_sweep_abs_mean = 0.0
 
-    mean_flow = np.mean(cell, axis=0)
+    if weights is not None:
+        mean_flow = np.sum(cell * weights[..., None], axis=0)
+    else:
+        mean_flow = np.mean(cell, axis=0)
     d_vx_dx = np.gradient(mean_flow[..., 0], axis=1)
     d_vy_dy = np.gradient(mean_flow[..., 1], axis=0)
     d_vy_dx = np.gradient(mean_flow[..., 1], axis=1)
@@ -316,9 +399,9 @@ def summarize_cell(
         y_center=y_center,
         mean_vx=mean_vx,
         mean_vy=mean_vy,
-        mean_speed=float(np.mean(active_speed)),
-        mean_speed_sq=float(np.mean(active_speed * active_speed)),
-        std_speed=float(np.std(active_speed)),
+        mean_speed=float(np.average(active_speed, weights=active_speed_weights)),
+        mean_speed_sq=float(np.average(active_speed * active_speed, weights=active_speed_weights)),
+        std_speed=float(np.sqrt(np.average((active_speed - np.average(active_speed, weights=active_speed_weights)) ** 2, weights=active_speed_weights))),
         active_fraction=active_fraction,
         alignment=alignment,
         direction_concentration=direction_concentration,
@@ -561,6 +644,7 @@ def apply_feature_weights(
     feature_names: list[str],
     angular_feature_weight: float,
     neighbor_feature_weight: float,
+    vertical_feature_weight: float = 1.0,
 ) -> None:
     angular_features = {
         "direction_concentration",
@@ -576,11 +660,20 @@ def apply_feature_weights(
         "neighbor_angular_sweep_abs_diff",
         "neighbor_direction_concentration_diff",
     }
+    vertical_features = {
+        "vertical_activity_coherence",
+        "vertical_alignment_coherence",
+        "vertical_direction_coherence",
+        "column_continuity",
+        "vertical_strand_score",
+    }
     for idx, name in enumerate(feature_names):
         if name in angular_features:
             x[:, idx] *= angular_feature_weight
         if name in neighbor_features:
             x[:, idx] *= neighbor_feature_weight
+        if name in vertical_features:
+            x[:, idx] *= vertical_feature_weight
 
 
 def fit_clusters(
@@ -594,10 +687,20 @@ def fit_clusters(
     angular_feature_weight: float,
     neighbor_feature_weight: float,
     feature_names: list[str],
+    vertical_feature_weight: float = 1.0,
+    hdbscan_min_cluster_size: int = 50,
+    hdbscan_min_samples: int = 0,
+    hdbscan_cluster_selection_epsilon: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, object]:
     scaler = StandardScaler()
     z = scaler.fit_transform(x)
-    apply_feature_weights(z, feature_names, angular_feature_weight, neighbor_feature_weight)
+    apply_feature_weights(
+        z,
+        feature_names,
+        angular_feature_weight,
+        neighbor_feature_weight,
+        vertical_feature_weight,
+    )
 
     pca = None
     if pca_components > 0:
@@ -634,11 +737,32 @@ def fit_clusters(
             raise RuntimeError(f"All GMM fit attempts failed: {attempted}")
         probs = model.predict_proba(z)
         labels = np.argmax(probs, axis=1)
-    else:
+    elif method == "kmeans":
         model = KMeans(n_clusters=clusters, n_init=20, random_state=random_state)
         labels = model.fit_predict(z)
         probs = np.zeros((len(labels), clusters), dtype=np.float32)
         probs[np.arange(len(labels)), labels] = 1.0
+    elif method == "hdbscan":
+        min_samples = None if hdbscan_min_samples <= 0 else hdbscan_min_samples
+        model = HDBSCAN(
+            min_cluster_size=hdbscan_min_cluster_size,
+            min_samples=min_samples,
+            cluster_selection_epsilon=hdbscan_cluster_selection_epsilon,
+            copy=True,
+        )
+        labels = model.fit_predict(z)
+        cluster_count = max(1, int(labels.max()) + 1)
+        probs = np.zeros((len(labels), cluster_count), dtype=np.float32)
+        membership = getattr(model, "probabilities_", np.ones(len(labels), dtype=np.float32))
+        clustered = labels >= 0
+        probs[np.arange(len(labels))[clustered], labels[clustered]] = membership[clustered]
+        print(
+            f"HDBSCAN found {cluster_count if np.any(clustered) else 0} clusters "
+            f"and {int(np.sum(~clustered)):,} noise rows",
+            flush=True,
+        )
+    else:
+        raise ValueError(f"Unsupported clustering method: {method}")
     return labels, probs, {"scaler": scaler, "pca": pca, "model": model}
 
 
@@ -682,6 +806,8 @@ def draw_overlay(
     min_active_fraction: float,
     top_mask_height: int,
     overlay_title: str,
+    display_label_hysteresis: int,
+    display_noise_hold_windows: int,
 ) -> None:
     by_window: dict[int, list[tuple[CellFeature, int, float]]] = {}
     for feature, label, prob_row in zip(features, labels, probs, strict=True):
@@ -699,6 +825,12 @@ def draw_overlay(
         (scale_width, scale_height),
     )
     colors = palette(probs.shape[1])
+    display_labels: dict[tuple[int, int], int] = {}
+    candidate_labels: dict[tuple[int, int], int] = {}
+    candidate_counts: dict[tuple[int, int], int] = {}
+    noise_hold_counts: dict[tuple[int, int], int] = {}
+    hysteresis_windows = max(1, display_label_hysteresis)
+    noise_hold_windows = max(0, display_noise_hold_windows)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     for window_id in sorted(by_window):
@@ -709,8 +841,51 @@ def draw_overlay(
             continue
         frame = cv2.resize(frame, (scale_width, scale_height), interpolation=cv2.INTER_AREA)
         overlay = frame.copy()
-        for feature, label, probability in by_window[window_id]:
-            color = colors[label]
+        for feature, raw_label, probability in by_window[window_id]:
+            cell_key = (feature.cell_row, feature.cell_col)
+            previous_label = display_labels.get(cell_key)
+            if previous_label is None:
+                label = raw_label
+                display_labels[cell_key] = label
+                candidate_labels.pop(cell_key, None)
+                candidate_counts.pop(cell_key, None)
+                noise_hold_counts[cell_key] = 0
+            elif raw_label == previous_label:
+                label = previous_label
+                display_labels[cell_key] = label
+                candidate_labels.pop(cell_key, None)
+                candidate_counts.pop(cell_key, None)
+                noise_hold_counts[cell_key] = 0
+            elif (
+                raw_label < 0
+                and previous_label >= 0
+                and noise_hold_counts.get(cell_key, 0) < noise_hold_windows
+            ):
+                label = previous_label
+                noise_hold_counts[cell_key] = noise_hold_counts.get(cell_key, 0) + 1
+                candidate_labels.pop(cell_key, None)
+                candidate_counts.pop(cell_key, None)
+            elif hysteresis_windows > 1:
+                noise_hold_counts[cell_key] = 0
+                if candidate_labels.get(cell_key) == raw_label:
+                    candidate_counts[cell_key] = candidate_counts.get(cell_key, 0) + 1
+                else:
+                    candidate_labels[cell_key] = raw_label
+                    candidate_counts[cell_key] = 1
+                if candidate_counts[cell_key] >= hysteresis_windows:
+                    label = raw_label
+                    display_labels[cell_key] = label
+                    candidate_labels.pop(cell_key, None)
+                    candidate_counts.pop(cell_key, None)
+                else:
+                    label = previous_label
+            else:
+                label = raw_label
+                display_labels[cell_key] = label
+                candidate_labels.pop(cell_key, None)
+                candidate_counts.pop(cell_key, None)
+                noise_hold_counts[cell_key] = 0
+            color = (128, 128, 128) if label < 0 else colors[label % len(colors)]
             cell_w = scale_width / grid_cols
             cell_h = scale_height / grid_rows
             x0 = int(feature.cell_col * cell_w)
@@ -808,6 +983,9 @@ def main() -> None:
         args.angular_feature_weight,
         args.neighbor_feature_weight,
         feature_names,
+        hdbscan_min_cluster_size=args.hdbscan_min_cluster_size,
+        hdbscan_min_samples=args.hdbscan_min_samples,
+        hdbscan_cluster_selection_epsilon=args.hdbscan_cluster_selection_epsilon,
     )
     write_features(out_dir / "motion_regime_features.csv", features, labels, probs)
     draw_overlay(
@@ -824,6 +1002,8 @@ def main() -> None:
         args.min_active_fraction,
         args.top_mask_height,
         args.overlay_title,
+        args.display_label_hysteresis,
+        args.display_noise_hold_windows,
     )
     metadata = {
         "analysis_version": ANALYSIS_VERSION,
@@ -839,6 +1019,9 @@ def main() -> None:
         "method": args.method,
         "gmm_covariance_type": args.gmm_covariance_type,
         "gmm_reg_covar": args.gmm_reg_covar,
+        "hdbscan_min_cluster_size": args.hdbscan_min_cluster_size,
+        "hdbscan_min_samples": args.hdbscan_min_samples,
+        "hdbscan_cluster_selection_epsilon": args.hdbscan_cluster_selection_epsilon,
         "pca_components": args.pca_components,
         "activity_threshold": args.activity_threshold,
         "flow_scale_width": args.flow_scale_width,
@@ -849,6 +1032,8 @@ def main() -> None:
         "feature_names": feature_names,
         "top_mask_height": args.top_mask_height,
         "overlay_title": args.overlay_title,
+        "display_label_hysteresis": args.display_label_hysteresis,
+        "display_noise_hold_windows": args.display_noise_hold_windows,
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"wrote features: {out_dir / 'motion_regime_features.csv'}")

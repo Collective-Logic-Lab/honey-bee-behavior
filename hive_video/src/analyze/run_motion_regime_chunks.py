@@ -33,13 +33,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grid-rows", type=int, default=32)
     parser.add_argument("--grid-cols", type=int, default=32)
     parser.add_argument("--clusters", type=int, default=8)
-    parser.add_argument("--method", choices=("gmm", "kmeans"), default="gmm")
+    parser.add_argument("--method", choices=("gmm", "kmeans", "hdbscan"), default="gmm")
     parser.add_argument(
         "--gmm-covariance-type",
         choices=("full", "tied", "diag", "spherical"),
         default="diag",
     )
     parser.add_argument("--gmm-reg-covar", type=float, default=1e-4)
+    parser.add_argument("--hdbscan-min-cluster-size", type=int, default=50)
+    parser.add_argument("--hdbscan-min-samples", type=int, default=0)
+    parser.add_argument("--hdbscan-cluster-selection-epsilon", type=float, default=0.0)
     parser.add_argument("--pca-components", type=int, default=8)
     parser.add_argument("--flow-scale-width", type=int, default=412)
     parser.add_argument("--activity-threshold", type=float, default=0.30)
@@ -63,6 +66,8 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Opaque black band, in output pixels, drawn across the top of chunk overlays.",
     )
+    parser.add_argument("--display-label-hysteresis", type=int, default=0)
+    parser.add_argument("--display-noise-hold-windows", type=int, default=0)
     parser.add_argument("--overlay-title", default="")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--concat-video", action="store_true")
@@ -177,6 +182,9 @@ def write_run_metadata(
         "method": args.method,
         "gmm_covariance_type": args.gmm_covariance_type,
         "gmm_reg_covar": args.gmm_reg_covar,
+        "hdbscan_min_cluster_size": args.hdbscan_min_cluster_size,
+        "hdbscan_min_samples": args.hdbscan_min_samples,
+        "hdbscan_cluster_selection_epsilon": args.hdbscan_cluster_selection_epsilon,
         "pca_components": args.pca_components,
         "flow_scale_width": args.flow_scale_width,
         "activity_threshold": args.activity_threshold,
@@ -187,6 +195,8 @@ def write_run_metadata(
         "velocity_transform": args.velocity_transform,
         "feature_set": args.feature_set,
         "top_mask_height": args.top_mask_height,
+        "display_label_hysteresis": args.display_label_hysteresis,
+        "display_noise_hold_windows": args.display_noise_hold_windows,
         "overlay_title": args.overlay_title,
         "overwrite": args.overwrite,
         "concat_video": args.concat_video,
@@ -292,6 +302,12 @@ def main() -> None:
                 args.gmm_covariance_type,
                 "--gmm-reg-covar",
                 str(args.gmm_reg_covar),
+                "--hdbscan-min-cluster-size",
+                str(args.hdbscan_min_cluster_size),
+                "--hdbscan-min-samples",
+                str(args.hdbscan_min_samples),
+                "--hdbscan-cluster-selection-epsilon",
+                str(args.hdbscan_cluster_selection_epsilon),
                 "--pca-components",
                 str(args.pca_components),
                 "--flow-scale-width",
@@ -312,6 +328,10 @@ def main() -> None:
                 args.feature_set,
                 "--top-mask-height",
                 str(args.top_mask_height),
+                "--display-label-hysteresis",
+                str(args.display_label_hysteresis),
+                "--display-noise-hold-windows",
+                str(args.display_noise_hold_windows),
                 "--overlay-title",
                 args.overlay_title,
             ]
