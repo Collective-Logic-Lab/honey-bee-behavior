@@ -42,6 +42,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-frame", type=int, default=215000)
     parser.add_argument("--end-frame", type=int, default=235000, help="Exclusive end frame.")
     parser.add_argument("--stride", type=int, default=1)
+    parser.add_argument(
+        "--source-synchronous-output",
+        action="store_true",
+        help=(
+            "Render one output frame for every source frame in [start-frame, end-frame). "
+            "This preserves source FPS and source-relative frame counts. Without this flag, "
+            "--stride controls both analysis cadence and rendered output cadence."
+        ),
+    )
     parser.add_argument("--chunk-target-frames", type=int, default=250)
     parser.add_argument("--flow-scale-width", type=int, default=824)
     parser.add_argument("--top-mask-height", type=int, default=72)
@@ -147,7 +156,11 @@ def draw_overlay_frame(
     if top_mask_height > 0:
         cv2.rectangle(frame, (0, 0), (width, min(top_mask_height, height)), (0, 0, 0), thickness=-1)
     lines = [
-        f"frame {target_frame} t={target_frame / fps:.1f}s base {setting.setting_id:04d}",
+        (
+            f"source_frame {target_frame} t={target_frame / fps:.3f}s "
+            f"window {target_frame - setting.window_frames + 1}-{target_frame} "
+            f"base {setting.setting_id:04d}"
+        ),
         (
             f"w{setting.window_frames} g{setting.grid_size} k{setting.clusters} "
             f"{setting.feature_set} {setting.velocity_transform} "
@@ -442,15 +455,17 @@ def main() -> None:
     base_setting = read_base_settings(args.source_manifest.expanduser(), [args.base_setting_id])[0]
     setting = replace(base_setting, vertical_feature_weight=args.vertical_weight)
     first_target = max(args.start_frame, setting.window_frames - 1)
-    target_frames = list(range(first_target, args.end_frame, args.stride))
+    render_stride = 1 if args.source_synchronous_output else max(1, args.stride)
+    target_frames = list(range(first_target, args.end_frame, render_stride))
     if not target_frames:
         raise ValueError("No target frames to render")
 
+    output_fps_stride = 1 if args.source_synchronous_output else max(1, args.stride)
     scale_width, scale_height, fps = scaled_video_size(video, args.flow_scale_width)
     writer = cv2.VideoWriter(
         str(out),
         cv2.VideoWriter_fourcc(*"mp4v"),
-        fps / max(1, args.stride),
+        fps / output_fps_stride,
         (scale_width, scale_height),
     )
     if not writer.isOpened():
@@ -544,7 +559,7 @@ def main() -> None:
         for frame in endnote_frames(
             scale_width,
             scale_height,
-            fps / max(1, args.stride),
+            fps / output_fps_stride,
             args.endnote_seconds,
             setting,
             target_frames[0],
