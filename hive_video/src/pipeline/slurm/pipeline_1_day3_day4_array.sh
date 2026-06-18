@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=100GB
 #SBATCH -t 24:00:00
-#SBATCH -p htc
+#SBATCH -p public
 #SBATCH -q public
 #SBATCH -o slurm.pipeline1.%A_%a.out
 #SBATCH -e slurm.pipeline1.%A_%a.err
@@ -17,15 +17,36 @@ set -eu
 export HIVE_VIDEO_ROOT=${HIVE_VIDEO_ROOT:-/home/pdressla/workspace/honey-bee-behavior/hive_video}
 export SCRATCH_ROOT=${SCRATCH_ROOT:-/scratch/pdressla/honey-bee}
 export UV_CACHE_DIR=${UV_CACHE_DIR:-/scratch/pdressla/.cache/uv}
+export UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-${SCRATCH_ROOT}/venvs/hive_video_pipeline_1}
+export UV_LINK_MODE=${UV_LINK_MODE:-copy}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 export VECLIB_MAXIMUM_THREADS=${VECLIB_MAXIMUM_THREADS:-1}
 
 cd "${HIVE_VIDEO_ROOT}"
-if [ -f .venv/bin/activate ]; then
-  source .venv/bin/activate
-fi
+
+mkdir -p "${SCRATCH_ROOT}/venvs" "${UV_CACHE_DIR}"
+
+LOCK_DIR="${UV_PROJECT_ENVIRONMENT}.lock"
+LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS:-1800}
+LOCK_START=$(date +%s)
+while ! mkdir "${LOCK_DIR}" 2>/dev/null; do
+  NOW=$(date +%s)
+  if [ $((NOW - LOCK_START)) -gt "${LOCK_WAIT_SECONDS}" ]; then
+    echo "Timed out waiting for uv environment lock: ${LOCK_DIR}" >&2
+    exit 3
+  fi
+  echo "Waiting for uv environment lock: ${LOCK_DIR}"
+  sleep 10
+done
+trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true' EXIT
+
+echo "Reconciling uv environment at ${UV_PROJECT_ENVIRONMENT}"
+uv sync --no-dev
+
+rmdir "${LOCK_DIR}" 2>/dev/null || true
+trap - EXIT
 
 case "${SLURM_ARRAY_TASK_ID}" in
   0)
@@ -58,7 +79,7 @@ OUT_ROOT="${SCRATCH_ROOT}/artifacts/pipeline_1/${DAY_KEY}_${MODE}"
 mkdir -p "${OUT_ROOT}"
 
 COMMAND=(
-  uv run python src/pipeline/pipeline_1/run.py
+  uv run --no-sync python src/pipeline/pipeline_1/run.py
   --video "${VIDEO}"
   --out-root "${OUT_ROOT}"
   --run-label "${DAY_KEY}_${MODE}"
