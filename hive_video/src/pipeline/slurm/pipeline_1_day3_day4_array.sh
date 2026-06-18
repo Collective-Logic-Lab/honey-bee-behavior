@@ -26,6 +26,10 @@ export VECLIB_MAXIMUM_THREADS=${VECLIB_MAXIMUM_THREADS:-1}
 
 cd "${HIVE_VIDEO_ROOT}"
 
+# Login shells may already have the repo-level venv active. Pipeline 1 uses a
+# scratch venv so array jobs do not concurrently mutate the shared checkout.
+unset VIRTUAL_ENV
+
 mkdir -p "${SCRATCH_ROOT}/venvs" "${UV_CACHE_DIR}"
 
 LOCK_DIR="${UV_PROJECT_ENVIRONMENT}.lock"
@@ -48,26 +52,51 @@ uv sync --no-dev
 rmdir "${LOCK_DIR}" 2>/dev/null || true
 trap - EXIT
 
+resolve_video() {
+  local flat_path="$1"
+  local nested_path="$2"
+  if [ -f "${flat_path}" ]; then
+    printf '%s\n' "${flat_path}"
+    return 0
+  fi
+  if [ -f "${nested_path}" ]; then
+    printf '%s\n' "${nested_path}"
+    return 0
+  fi
+  echo "Could not find resequenced video. Checked:" >&2
+  echo "  ${flat_path}" >&2
+  echo "  ${nested_path}" >&2
+  return 1
+}
+
 case "${SLURM_ARRAY_TASK_ID}" in
   0)
     DAY_KEY="start03"
     MODE="fixed"
-    VIDEO="${SCRATCH_ROOT}/artifacts/resequenced/reseq_start03_20190608_181426_side0_top/reseq_1_start03__20190608_181426_side0_top.mp4"
+    VIDEO="$(resolve_video \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_1_start03__20190608_181426_side0_top.mp4" \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_start03_20190608_181426_side0_top/reseq_1_start03__20190608_181426_side0_top.mp4")"
     ;;
   1)
     DAY_KEY="start03"
     MODE="decay"
-    VIDEO="${SCRATCH_ROOT}/artifacts/resequenced/reseq_start03_20190608_181426_side0_top/reseq_1_start03__20190608_181426_side0_top.mp4"
+    VIDEO="$(resolve_video \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_1_start03__20190608_181426_side0_top.mp4" \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_start03_20190608_181426_side0_top/reseq_1_start03__20190608_181426_side0_top.mp4")"
     ;;
   2)
     DAY_KEY="start04"
     MODE="fixed"
-    VIDEO="${SCRATCH_ROOT}/artifacts/resequenced/reseq_start04_20190609_175013_side0_top/reseq_1_start04__20190609_175013_side0_top.mp4"
+    VIDEO="$(resolve_video \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_1_start04__20190609_175013_side0_top.mp4" \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_start04_20190609_175013_side0_top/reseq_1_start04__20190609_175013_side0_top.mp4")"
     ;;
   3)
     DAY_KEY="start04"
     MODE="decay"
-    VIDEO="${SCRATCH_ROOT}/artifacts/resequenced/reseq_start04_20190609_175013_side0_top/reseq_1_start04__20190609_175013_side0_top.mp4"
+    VIDEO="$(resolve_video \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_1_start04__20190609_175013_side0_top.mp4" \
+      "${SCRATCH_ROOT}/artifacts/resequenced/reseq_start04_20190609_175013_side0_top/reseq_1_start04__20190609_175013_side0_top.mp4")"
     ;;
   *)
     echo "Unsupported SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}" >&2
