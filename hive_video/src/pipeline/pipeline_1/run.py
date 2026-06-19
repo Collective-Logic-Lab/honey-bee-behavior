@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import pickle
+import subprocess
 import sys
 import time
 from dataclasses import asdict, replace
@@ -89,6 +91,11 @@ def parse_args() -> argparse.Namespace:
         help="Write no stats, aggregate cluster summary, or per-frame cluster stats plus summary.",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Ignore existing Pipeline 1 cache/chunk artifacts and recompute this run.",
+    )
     parser.add_argument("--safeword-file", type=Path, default=Path(".safeword"))
     parser.add_argument("--window-frames", type=int, default=None)
     parser.add_argument("--grid-size", type=int, default=None)
@@ -169,6 +176,34 @@ def output_stem(branch: str, start: int, end: int, decay_half_life: float) -> st
         return f"pipeline_1_fixed_frames{start}_{end - 1}"
     label = f"h{decay_half_life:g}".replace(".", "p")
     return f"pipeline_1_decay_{label}_frames{start}_{end - 1}"
+
+
+def atomic_write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    tmp.replace(path)
+
+
+def atomic_save_npz(path: Path, **arrays) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("wb") as f:
+        np.savez_compressed(f, **arrays)
+    tmp.replace(path)
+
+
+def atomic_pickle(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("wb") as f:
+        pickle.dump(payload, f)
+    tmp.replace(path)
+
+
+def load_pickle(path: Path) -> object:
+    with path.open("rb") as f:
+        return pickle.load(f)
 
 
 def read_color_frames(video: Path, start_frame: int, end_frame: int, width: int) -> tuple[list[np.ndarray], float]:
@@ -299,29 +334,60 @@ def fit_fixed_model(
     sample_stride: int,
     decay_half_life_frames: float,
     safeword_file: Path,
+    cache_dir: Path,
+    overwrite: bool,
 ) -> tuple[object, list[str], int]:
     sample_targets = valid_targets[:: max(1, sample_stride)]
     if not sample_targets:
         raise ValueError("No valid target frames available for fixed-GMM fitting")
+
+    model_path = cache_dir / "fixed_gmm_bundle.pkl"
+    samples_dir = cache_dir / "fit_samples"
+    if model_path.exists() and not overwrite:
+        payload = load_pickle(model_path)
+        print(f"loaded cached fixed model: {model_path}", flush=True)
+        return payload["bundle"], payload["feature_names"], int(payload["fit_sample_count"])
+
     matrices = []
     feature_names = None
     total = len(sample_targets)
     for index, target_frame in enumerate(sample_targets, start=1):
         if safeword_triggered(safeword_file):
             raise RuntimeError("safeword detected while fitting fixed model")
-        read_start = target_frame - setting.window_frames + 1
-        gray_frames, _ = read_frames(video, read_start, setting.window_frames, flow_scale_width)
-        flows = compute_flows(gray_frames)
-        features, vertical = extract_one_window_features(
-            flows,
-            target_frame,
-            setting.window_frames,
-            setting,
-            decay_half_life_frames,
-        )
-        x, feature_names = feature_matrix_with_vertical(features, vertical, setting)
+        sample_path = samples_dir / f"sample_{index:05d}_frame_{target_frame:09d}.npz"
+        if sample_path.exists() and not overwrite:
+            with np.load(sample_path, allow_pickle=False) as cached:
+                x = cached["x"]
+                feature_names = [str(name) for name in cached["feature_names"].tolist()]
+            print(
+                f"loaded cached fixed-model sample {index:,}/{total:,} "
+                f"target_frame={target_frame}",
+                flush=True,
+            )
+        else:
+            read_start = target_frame - setting.window_frames + 1
+            gray_frames, _ = read_frames(video, read_start, setting.window_frames, flow_scale_width)
+            flows = compute_flows(gray_frames)
+            features, vertical = extract_one_window_features(
+                flows,
+                target_frame,
+                setting.window_frames,
+                setting,
+                decay_half_life_frames,
+            )
+            x, feature_names = feature_matrix_with_vertical(features, vertical, setting)
+            atomic_save_npz(
+                sample_path,
+                x=x,
+                feature_names=np.array(feature_names, dtype="U64"),
+                target_frame=np.array([target_frame], dtype=np.int64),
+            )
+            print(
+                f"computed fixed-model sample {index:,}/{total:,} "
+                f"target_frame={target_frame}",
+                flush=True,
+            )
         matrices.append(x)
-        print(f"fixed-model sample {index:,}/{total:,} target_frame={target_frame}", flush=True)
     x_fit = np.vstack(matrices)
     _, _, bundle = fit_clusters(
         x_fit,
@@ -336,6 +402,18 @@ def fit_fixed_model(
         feature_names,
         setting.vertical_feature_weight,
     )
+    atomic_pickle(
+        model_path,
+        {
+            "bundle": bundle,
+            "feature_names": feature_names,
+            "fit_sample_count": len(sample_targets),
+            "sample_targets": sample_targets,
+            "setting": asdict(setting),
+            "decay_half_life_frames": decay_half_life_frames,
+        },
+    )
+    print(f"cached fixed model: {model_path}", flush=True)
     return bundle, feature_names, len(sample_targets)
 
 
@@ -459,6 +537,72 @@ def append_csv(path: Path, rows: list[dict[str, float]]) -> None:
         writer.writerows(rows)
 
 
+def add_stats(left: list[dict[str, float]], right: list[dict[str, float]]) -> None:
+    for target, source in zip(left, right, strict=True):
+        for key, value in source.items():
+            if key == "label":
+                continue
+            target[key] += value
+
+
+def load_chunk_stats(path: Path, cluster_count: int) -> list[dict[str, float]]:
+    if not path.exists():
+        return init_summary_stats(cluster_count)
+    data = json.loads(path.read_text())
+    return data["stats"]
+
+
+def write_chunk_stats(path: Path, stats: list[dict[str, float]], written_frames: int) -> None:
+    atomic_write_json(path, {"written_frames": written_frames, "stats": stats})
+
+
+def concat_videos(parts: list[Path], out_path: Path) -> None:
+    if not parts:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    list_path = out_path.with_suffix(out_path.suffix + ".concat.txt")
+    with list_path.open("w") as f:
+        for part in parts:
+            escaped = str(part.resolve()).replace("'", "'\\''")
+            f.write(f"file '{escaped}'\n")
+    command = [
+        "ffmpeg",
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(list_path.resolve()),
+        "-c",
+        "copy",
+        str(out_path.resolve()),
+    ]
+    subprocess.run(command, check=True)
+
+
+def concat_csv(parts: list[Path], out_path: Path) -> None:
+    existing = [path for path in parts if path.exists()]
+    if not existing:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="") as out:
+        wrote_header = False
+        for path in existing:
+            with path.open(newline="") as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                if header is None:
+                    continue
+                if not wrote_header:
+                    csv.writer(out).writerow(header)
+                    wrote_header = True
+                for row in reader:
+                    csv.writer(out).writerow(row)
+
+
 def render_branch(
     args: argparse.Namespace,
     video: Path,
@@ -480,6 +624,9 @@ def render_branch(
     diptych_path = out_root / f"{stem}_diptych.mp4"
     summary_path = out_root / f"{stem}_cluster_summary.csv"
     per_frame_path = out_root / f"{stem}_per_frame_cluster_stats.csv"
+    cache_dir = out_root / "_pipeline_1_cache" / stem
+    chunks_dir = out_root / f"{stem}_chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"fitting Pipeline 1 {branch} model", flush=True)
     all_targets = list(range(start, end))
@@ -492,36 +639,51 @@ def render_branch(
         args.fit_sample_stride,
         decay_half_life,
         safeword_file,
+        cache_dir,
+        args.overwrite,
     )
-
-    overlay_writer = cv2.VideoWriter(
-        str(overlay_path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (scale_width, scale_height),
-    )
-    if not overlay_writer.isOpened():
-        raise RuntimeError(f"Could not open writer: {overlay_path}")
-    diptych_writer = None
-    if args.diptych:
-        diptych_writer = cv2.VideoWriter(
-            str(diptych_path),
-            cv2.VideoWriter_fourcc(*"mp4v"),
-            fps,
-            (scale_width * 2, scale_height),
-        )
-        if not diptych_writer.isOpened():
-            raise RuntimeError(f"Could not open writer: {diptych_path}")
 
     stats = init_summary_stats(setting.clusters)
     written = 0
     started = time.monotonic()
+    overlay_parts: list[Path] = []
+    diptych_parts: list[Path] = []
+    per_frame_parts: list[Path] = []
 
-    for chunk_start in range(start, end, args.chunk_target_frames):
+    for chunk_index, chunk_start in enumerate(range(start, end, args.chunk_target_frames)):
         if safeword_triggered(safeword_file):
             print("safeword detected; stopping branch cleanly", flush=True)
             break
         chunk_end = min(end, chunk_start + args.chunk_target_frames)
+        chunk_label = f"chunk_{chunk_index:06d}_frames{chunk_start}_{chunk_end - 1}"
+        overlay_part = chunks_dir / f"{chunk_label}_overlay.mp4"
+        diptych_part = chunks_dir / f"{chunk_label}_diptych.mp4"
+        stats_part = chunks_dir / f"{chunk_label}_stats.json"
+        per_frame_part = chunks_dir / f"{chunk_label}_per_frame_cluster_stats.csv"
+        overlay_parts.append(overlay_part)
+        if args.diptych:
+            diptych_parts.append(diptych_part)
+        if args.stats == "per-frame":
+            per_frame_parts.append(per_frame_part)
+
+        chunk_complete = (
+            overlay_part.exists()
+            and stats_part.exists()
+            and (not args.diptych or diptych_part.exists())
+            and (args.stats != "per-frame" or per_frame_part.exists())
+            and not args.overwrite
+        )
+        if chunk_complete:
+            chunk_stats = load_chunk_stats(stats_part, setting.clusters)
+            add_stats(stats, chunk_stats)
+            written += chunk_end - chunk_start
+            print(
+                f"{branch}: skipped completed {chunk_label}; "
+                f"{written:,}/{end - start:,} source-synchronous frames accounted",
+                flush=True,
+            )
+            continue
+
         chunk_targets = list(range(chunk_start, chunk_end))
         color_frames, _ = read_color_frames(video, chunk_start, chunk_end, scale_width)
         if len(color_frames) != len(chunk_targets):
@@ -531,9 +693,31 @@ def render_branch(
             )
             chunk_targets = chunk_targets[: len(color_frames)]
 
+        overlay_writer = cv2.VideoWriter(
+            str(overlay_part),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (scale_width, scale_height),
+        )
+        if not overlay_writer.isOpened():
+            raise RuntimeError(f"Could not open writer: {overlay_part}")
+        diptych_writer = None
+        if args.diptych:
+            diptych_writer = cv2.VideoWriter(
+                str(diptych_part),
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                fps,
+                (scale_width * 2, scale_height),
+            )
+            if not diptych_writer.isOpened():
+                overlay_writer.release()
+                raise RuntimeError(f"Could not open writer: {diptych_part}")
+
         valid_chunk_targets = [frame for frame in chunk_targets if frame >= setting.window_frames - 1]
         flows = None
         read_start = None
+        chunk_stats = init_summary_stats(setting.clusters)
+        per_frame_rows_for_chunk: list[dict[str, float]] = []
         if valid_chunk_targets:
             read_start = valid_chunk_targets[0] - setting.window_frames + 1
             read_stop = valid_chunk_targets[-1]
@@ -564,9 +748,11 @@ def render_branch(
                 )
                 x, feature_names = feature_matrix_with_vertical(features, vertical, setting)
                 labels, probs = predict_with_fixed_model(x, feature_names, fixed_bundle, setting)
-                update_stats(stats, features, vertical, labels, probs)
+                update_stats(chunk_stats, features, vertical, labels, probs)
                 if args.stats == "per-frame":
-                    append_csv(per_frame_path, per_frame_rows(target_frame, features, vertical, labels, probs))
+                    per_frame_rows_for_chunk.extend(
+                        per_frame_rows(target_frame, features, vertical, labels, probs)
+                    )
                 overlay_frame = draw_overlay_frame(
                     source_frame.copy(),
                     features,
@@ -585,11 +771,33 @@ def render_branch(
                 diptych_writer.write(np.hstack([source_frame, overlay_frame]))
             written += 1
 
+        overlay_writer.release()
+        if diptych_writer is not None:
+            diptych_writer.release()
+        if args.stats == "per-frame":
+            if per_frame_part.exists() and args.overwrite:
+                per_frame_part.unlink()
+            append_csv(per_frame_part, per_frame_rows_for_chunk)
+        write_chunk_stats(stats_part, chunk_stats, len(chunk_targets))
+        add_stats(stats, chunk_stats)
         print(f"{branch}: wrote {written:,}/{end - start:,} source-synchronous frames", flush=True)
 
-    overlay_writer.release()
-    if diptych_writer is not None:
-        diptych_writer.release()
+    completed_overlay_parts = [path for path in overlay_parts if path.exists()]
+    expected_chunks = len(list(range(start, end, args.chunk_target_frames)))
+    if len(completed_overlay_parts) == expected_chunks:
+        concat_videos(completed_overlay_parts, overlay_path)
+        if args.diptych:
+            completed_diptych_parts = [path for path in diptych_parts if path.exists()]
+            if len(completed_diptych_parts) == expected_chunks:
+                concat_videos(completed_diptych_parts, diptych_path)
+        if args.stats == "per-frame":
+            concat_csv(per_frame_parts, per_frame_path)
+    else:
+        print(
+            f"{branch}: not concatenating final video; "
+            f"{len(completed_overlay_parts)}/{expected_chunks} chunks are present",
+            flush=True,
+        )
     if args.stats in {"summary", "per-frame"}:
         write_summary_stats(summary_path, stats)
 
