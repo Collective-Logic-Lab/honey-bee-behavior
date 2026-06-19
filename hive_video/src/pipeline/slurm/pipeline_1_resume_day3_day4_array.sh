@@ -21,5 +21,12 @@
 
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${SCRIPT_DIR}/pipeline_1_day3_day4_array.sh"
+export HIVE_VIDEO_ROOT=${HIVE_VIDEO_ROOT:-/home/pdressla/workspace/honey-bee-behavior/hive_video}
+TARGET_SCRIPT="${HIVE_VIDEO_ROOT}/src/pipeline/slurm/pipeline_1_day3_day4_array.sh"
+
+if [ ! -f "${TARGET_SCRIPT}" ]; then
+  echo "Could not find Pipeline 1 Slurm script: ${TARGET_SCRIPT}" >&2
+  exit 2
+fi
+
+exec "${TARGET_SCRIPT}"
