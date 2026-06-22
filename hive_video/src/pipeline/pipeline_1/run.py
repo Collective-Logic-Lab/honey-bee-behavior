@@ -80,6 +80,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--decay-half-life-frames", type=float, default=125.0)
     parser.add_argument("--fit-sample-stride", type=int, default=250)
     parser.add_argument("--chunk-target-frames", type=int, default=250)
+    parser.add_argument(
+        "--analysis-stride",
+        type=int,
+        default=1,
+        help=(
+            "Compute the expensive motion-regime analysis every N source frames "
+            "and hold the most recent overlay between analysis frames. Output "
+            "video still keeps every source frame. Use 1 for exact per-frame analysis."
+        ),
+    )
     parser.add_argument("--flow-scale-width", type=int, default=824)
     parser.add_argument("--top-mask-height", type=int, default=72)
     parser.add_argument("--min-active-fraction", type=float, default=0.005)
@@ -171,11 +181,28 @@ def resolve_range(args: argparse.Namespace, frame_count: int) -> tuple[int, int]
     return start, end
 
 
-def output_stem(branch: str, start: int, end: int, decay_half_life: float) -> str:
+def output_stem(branch: str, start: int, end: int, decay_half_life: float, analysis_stride: int = 1) -> str:
+    stride_suffix = "" if analysis_stride <= 1 else f"_astride{analysis_stride}"
     if branch == "fixed":
-        return f"pipeline_1_fixed_frames{start}_{end - 1}"
+        return f"pipeline_1_fixed_frames{start}_{end - 1}{stride_suffix}"
     label = f"h{decay_half_life:g}".replace(".", "p")
-    return f"pipeline_1_decay_{label}_frames{start}_{end - 1}"
+    return f"pipeline_1_decay_{label}_frames{start}_{end - 1}{stride_suffix}"
+
+
+def analysis_targets_for_chunk(
+    chunk_targets: list[int],
+    first_valid_global: int,
+    setting: Setting,
+    analysis_stride: int,
+) -> list[int]:
+    valid_targets = [frame for frame in chunk_targets if frame >= setting.window_frames - 1]
+    if not valid_targets:
+        return []
+    stride = max(1, analysis_stride)
+    targets = [frame for frame in valid_targets if (frame - first_valid_global) % stride == 0]
+    if valid_targets[0] not in targets:
+        targets.insert(0, valid_targets[0])
+    return sorted(set(targets))
 
 
 def atomic_write_json(path: Path, payload: object) -> None:
@@ -262,6 +289,7 @@ def draw_overlay_frame(
     probs: np.ndarray,
     setting: Setting,
     target_frame: int,
+    analysis_frame: int,
     fps: float,
     top_mask_height: int,
     min_active_fraction: float,
@@ -294,7 +322,8 @@ def draw_overlay_frame(
         [
             (
                 f"source_frame {target_frame} t={target_frame / fps:.3f}s "
-                f"window {target_frame - setting.window_frames + 1}-{target_frame} "
+                f"analysis_frame {analysis_frame} "
+                f"window {analysis_frame - setting.window_frames + 1}-{analysis_frame} "
                 f"base {setting.setting_id:04d}"
             ),
             (
@@ -448,13 +477,21 @@ def update_stats(stats: list[dict[str, float]], features, vertical, labels: np.n
         row["vertical_strand_score"] += vertical_values["vertical_strand_score"]
 
 
-def per_frame_rows(target_frame: int, features, vertical, labels: np.ndarray, probs: np.ndarray) -> list[dict[str, float]]:
+def per_frame_rows(
+    target_frame: int,
+    analysis_frame: int,
+    features,
+    vertical,
+    labels: np.ndarray,
+    probs: np.ndarray,
+) -> list[dict[str, float]]:
     grouped: dict[int, dict[str, float]] = {}
     for feature, label, prob_row in zip(features, labels, probs, strict=True):
         row = grouped.setdefault(
             int(label),
             {
                 "source_frame": float(target_frame),
+                "analysis_frame": float(analysis_frame),
                 "cluster": float(label),
                 "count": 0.0,
                 "mean_probability": 0.0,
@@ -619,18 +656,20 @@ def render_branch(
 ) -> dict:
     scale_width = args.flow_scale_width
     scale_height = max(1, round(scale_width * source_height / source_width))
-    stem = output_stem(branch, start, end, decay_half_life)
+    model_stem = output_stem(branch, start, end, decay_half_life, analysis_stride=1)
+    stem = output_stem(branch, start, end, decay_half_life, analysis_stride=args.analysis_stride)
     overlay_path = out_root / f"{stem}.mp4"
     diptych_path = out_root / f"{stem}_diptych.mp4"
     summary_path = out_root / f"{stem}_cluster_summary.csv"
     per_frame_path = out_root / f"{stem}_per_frame_cluster_stats.csv"
-    cache_dir = out_root / "_pipeline_1_cache" / stem
+    cache_dir = out_root / "_pipeline_1_cache" / model_stem
     chunks_dir = out_root / f"{stem}_chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"fitting Pipeline 1 {branch} model", flush=True)
     all_targets = list(range(start, end))
     valid_targets = [frame for frame in all_targets if frame >= setting.window_frames - 1]
+    first_valid_global = valid_targets[0] if valid_targets else setting.window_frames - 1
     fixed_bundle, _, fit_samples = fit_fixed_model(
         video,
         valid_targets,
@@ -713,17 +752,34 @@ def render_branch(
                 overlay_writer.release()
                 raise RuntimeError(f"Could not open writer: {diptych_part}")
 
-        valid_chunk_targets = [frame for frame in chunk_targets if frame >= setting.window_frames - 1]
+        analysis_chunk_targets = analysis_targets_for_chunk(
+            chunk_targets,
+            first_valid_global,
+            setting,
+            args.analysis_stride,
+        )
+        analysis_target_set = set(analysis_chunk_targets)
         flows = None
         read_start = None
         chunk_stats = init_summary_stats(setting.clusters)
         per_frame_rows_for_chunk: list[dict[str, float]] = []
-        if valid_chunk_targets:
-            read_start = valid_chunk_targets[0] - setting.window_frames + 1
-            read_stop = valid_chunk_targets[-1]
+        if analysis_chunk_targets:
+            read_start = analysis_chunk_targets[0] - setting.window_frames + 1
+            read_stop = analysis_chunk_targets[-1]
             gray_frames, _ = read_frames(video, read_start, read_stop - read_start + 1, scale_width)
             flows = compute_flows(gray_frames)
+            print(
+                f"{branch}: {chunk_label} analysis frames "
+                f"{len(analysis_chunk_targets):,}/{len(chunk_targets):,} "
+                f"(stride={args.analysis_stride})",
+                flush=True,
+            )
 
+        held_analysis_frame = None
+        held_features = None
+        held_vertical = None
+        held_labels = None
+        held_probs = None
         for target_frame, source_frame in zip(chunk_targets, color_frames, strict=False):
             if target_frame < setting.window_frames - 1:
                 overlay_frame = draw_warmup_frame(
@@ -736,31 +792,47 @@ def render_branch(
             else:
                 assert flows is not None
                 assert read_start is not None
-                local_start = target_frame - setting.window_frames + 1 - read_start
-                local_stop = target_frame - read_start
-                flow_slice = flows[local_start:local_stop]
-                features, vertical = extract_one_window_features(
-                    flow_slice,
-                    target_frame,
-                    setting.window_frames,
-                    setting,
-                    decay_half_life,
-                )
-                x, feature_names = feature_matrix_with_vertical(features, vertical, setting)
-                labels, probs = predict_with_fixed_model(x, feature_names, fixed_bundle, setting)
-                update_stats(chunk_stats, features, vertical, labels, probs)
+                if target_frame in analysis_target_set or held_features is None:
+                    local_start = target_frame - setting.window_frames + 1 - read_start
+                    local_stop = target_frame - read_start
+                    flow_slice = flows[local_start:local_stop]
+                    held_features, held_vertical = extract_one_window_features(
+                        flow_slice,
+                        target_frame,
+                        setting.window_frames,
+                        setting,
+                        decay_half_life,
+                    )
+                    x, feature_names = feature_matrix_with_vertical(held_features, held_vertical, setting)
+                    held_labels, held_probs = predict_with_fixed_model(x, feature_names, fixed_bundle, setting)
+                    held_analysis_frame = target_frame
+
+                assert held_analysis_frame is not None
+                assert held_features is not None
+                assert held_vertical is not None
+                assert held_labels is not None
+                assert held_probs is not None
+                update_stats(chunk_stats, held_features, held_vertical, held_labels, held_probs)
                 if args.stats == "per-frame":
                     per_frame_rows_for_chunk.extend(
-                        per_frame_rows(target_frame, features, vertical, labels, probs)
+                        per_frame_rows(
+                            target_frame,
+                            held_analysis_frame,
+                            held_features,
+                            held_vertical,
+                            held_labels,
+                            held_probs,
+                        )
                     )
                 overlay_frame = draw_overlay_frame(
                     source_frame.copy(),
-                    features,
-                    vertical,
-                    labels,
-                    probs,
+                    held_features,
+                    held_vertical,
+                    held_labels,
+                    held_probs,
                     setting,
                     target_frame,
+                    held_analysis_frame,
                     fps,
                     args.top_mask_height,
                     args.min_active_fraction,
@@ -811,12 +883,19 @@ def render_branch(
         "per_frame_cluster_stats_csv": str(per_frame_path) if args.stats == "per-frame" else None,
         "written_frames": written,
         "fit_sample_count": fit_samples,
+        "analysis_stride": args.analysis_stride,
         "elapsed_seconds": elapsed,
     }
 
 
 def main() -> None:
     args = parse_args()
+    if args.analysis_stride < 1:
+        raise ValueError("--analysis-stride must be at least 1")
+    if args.chunk_target_frames < 1:
+        raise ValueError("--chunk-target-frames must be at least 1")
+    if args.fit_sample_stride < 1:
+        raise ValueError("--fit-sample-stride must be at least 1")
     started = time.monotonic()
     video = args.video.expanduser()
     out_root = args.out_root.expanduser()
@@ -849,6 +928,7 @@ def main() -> None:
         "branches": [{"branch": name, "decay_half_life_frames": decay} for name, decay in branches],
         "fit_sample_stride": args.fit_sample_stride,
         "chunk_target_frames": args.chunk_target_frames,
+        "analysis_stride": args.analysis_stride,
         "flow_scale_width": args.flow_scale_width,
         "top_mask_height": args.top_mask_height,
         "diptych": args.diptych,
