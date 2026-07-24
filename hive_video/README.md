@@ -68,6 +68,10 @@ submissions with one manual check in the middle, all from `hive_video/`.
 sbatch src/pipeline/slurm/resequence/download_raw_array.sh
 ```
 
+Run the Slurm commands in this section from the `hive_video/` checkout root.
+The jobs use Slurm's recorded submission directory to locate their shared
+scripts after Slurm copies the submitted script into its spool directory.
+
 Pulls the three Day 4 / Day 47 top videos from the Edmond archive
 (doi:10.17617/3.LLWRWR) into `/scratch/pdressla/honey-bee/downloads/`. Transfers
 resume and are MD5-checked, so re-running a failed task is safe. For other

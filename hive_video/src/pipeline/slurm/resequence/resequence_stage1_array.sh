@@ -38,7 +38,12 @@
 
 set -eu
 
-source "$(dirname "$(readlink -f "$0")")/common.sh"
+# Slurm executes a copy of this script from /var/spool/slurmd, so $0 does not
+# identify the checkout. The documented submission command runs from the
+# hive_video root, which Slurm records in SLURM_SUBMIT_DIR.
+export HIVE_VIDEO_ROOT=${HIVE_VIDEO_ROOT:-${SLURM_SUBMIT_DIR:-${PWD}}}
+SCRIPT_DIR="${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence"
+source "${SCRIPT_DIR}/common.sh"
 
 LOCATORS=${LOCATORS:-"day4_side1_top day47_side0_top day47_side1_top"}
 

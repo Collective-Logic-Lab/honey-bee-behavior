@@ -3,7 +3,8 @@
 #
 # Source this from a job script; it is not meant to be run on its own:
 #
-#   source "$(dirname "$0")/common.sh"
+#   export HIVE_VIDEO_ROOT="${SLURM_SUBMIT_DIR:-${PWD}}"
+#   source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
 #   hv_sync_env
 #   hv_resolve day47_side1_top
 #
