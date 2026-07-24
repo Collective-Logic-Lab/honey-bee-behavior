@@ -34,9 +34,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--input-kind",
-        choices=("jumps", "events"),
+        choices=("jumps", "events", "cut-review"),
         default="jumps",
-        help="Interpret --jumps as raw jump candidates or summarized events.",
+        help=(
+            "Interpret --jumps as raw candidates, summarized events, or a manually "
+            "verified cut-review CSV."
+        ),
     )
     parser.add_argument(
         "--single-jump-events-only",
@@ -123,9 +126,30 @@ def read_jump_prev_frames(
 ) -> list[int]:
     print(f"reading {input_kind}: {path}", flush=True)
     rows = []
+    verified_cuts: list[int] = []
     with path.open() as f:
         reader = csv.DictReader(f)
+        if input_kind == "cut-review":
+            required = {"keep", "prev_frame_idx"}
+            missing = required - set(reader.fieldnames or [])
+            if missing:
+                raise ValueError(
+                    f"Verified cut review is missing columns {sorted(missing)}: {path}"
+                )
         for row in reader:
+            if input_kind == "cut-review":
+                keep = (row.get("keep") or "").strip().casefold()
+                if keep in {"0", "false", "no", "n", ""}:
+                    continue
+                if keep not in {"1", "true", "yes", "y"}:
+                    raise ValueError(
+                        f"Invalid keep value {row.get('keep')!r}; use 1 or 0 in {path}"
+                    )
+                cut = int(row["prev_frame_idx"])
+                if cut < 0:
+                    raise ValueError(f"Cut frame must be non-negative, got {cut} in {path}")
+                verified_cuts.append(cut)
+                continue
             if input_kind == "events":
                 jump_count = int(row["jump_count"])
                 duration_frames = int(row["duration_frames"])
@@ -146,6 +170,17 @@ def read_jump_prev_frames(
                     "mean_abs_diff": float(row["mean_abs_diff"]),
                 }
             )
+    if input_kind == "cut-review":
+        duplicates = sorted(
+            cut for cut in set(verified_cuts) if verified_cuts.count(cut) > 1
+        )
+        if duplicates:
+            raise ValueError(f"Verified cut review contains duplicate cuts: {duplicates}")
+        cuts = sorted(verified_cuts)
+        if not cuts:
+            raise ValueError(f"Verified cut review selects no cuts: {path}")
+        print(f"read {len(cuts)} manually verified cuts", flush=True)
+        return cuts
     rows.sort(key=lambda r: r["mean_abs_diff"], reverse=True)
     selected = rows[:top_n]
     cut_frames = sorted({row["prev_frame_idx"] for row in selected})
@@ -229,7 +264,8 @@ def main() -> None:
     elif duration_s is not None:
         frame_count = math.ceil(duration_s * fps)
         print(
-            f"estimated frame count from duration * fps: {duration_s:.6f} * {fps:.6f} = {frame_count}",
+            "estimated frame count from duration * fps: "
+            f"{duration_s:.6f} * {fps:.6f} = {frame_count}",
             flush=True,
         )
     else:
@@ -247,6 +283,11 @@ def main() -> None:
         print(
             f"added {len(cut_prev_frames) - before} forced cuts from --extra-cut-prev-frame",
             flush=True,
+        )
+    invalid_cuts = [cut for cut in cut_prev_frames if cut < 0 or cut >= frame_count - 1]
+    if invalid_cuts:
+        raise ValueError(
+            f"Cut frames must be between 0 and {frame_count - 2}; got {invalid_cuts}"
         )
     write_segments(out, video, frame_count, fps, duration_s, cut_prev_frames)
     print(f"video frames: {frame_count}")

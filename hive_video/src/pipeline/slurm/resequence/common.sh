@@ -6,7 +6,7 @@
 #   export HIVE_VIDEO_ROOT="${SLURM_SUBMIT_DIR:-${PWD}}"
 #   source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
 #   hv_sync_env
-#   hv_resolve day47_side1_top
+#   hv_resolve start47_side1_top
 #
 # After hv_resolve, these are set:
 #   RESEQ_KEY       start47_20190731_184423_side1_top
@@ -65,13 +65,13 @@ hv_sync_env() {
   trap 'rmdir "'"${lock_dir}"'" 2>/dev/null || true' EXIT
 
   echo "Reconciling uv environment at ${UV_PROJECT_ENVIRONMENT}"
-  uv sync --no-dev
+  uv sync --frozen --no-dev
 
   rmdir "${lock_dir}" 2>/dev/null || true
   trap - EXIT
 }
 
-# Resolve a locator such as day47_side1_top into every path the pipeline needs.
+# Resolve a locator such as start47_side1_top into every path the pipeline needs.
 hv_resolve() {
   local locator="$1"
   local assignments
@@ -114,6 +114,44 @@ hv_require_file() {
     echo "$2" >&2
     exit 4
   fi
+}
+
+# Return success when a step must run. A marker is reusable only when its
+# recorded input signature matches the current one.
+hv_step_needed() {
+  local marker="$1"
+  local signature="$2"
+  shift 2
+  if [ "${FORCE:-0}" = "1" ]; then
+    return 0
+  fi
+  local output
+  for output in "$@"; do
+    if [ ! -s "${output}" ]; then
+      echo "--- output missing or empty; rerunning step: ${output}"
+      return 0
+    fi
+  done
+  if [ -f "${marker}" ] && [ "$(cat "${marker}")" = "${signature}" ]; then
+    echo "--- skipping completed step: ${marker}"
+    return 1
+  fi
+  if [ -f "${marker}" ]; then
+    echo "--- inputs changed; rerunning step: ${marker}"
+  fi
+  return 0
+}
+
+hv_mark_complete() {
+  local marker="$1"
+  local signature="$2"
+  local partial="${marker}.partial"
+  printf '%s\n' "${signature}" >"${partial}"
+  mv "${partial}" "${marker}"
+}
+
+hv_file_fingerprint() {
+  cksum "$1" | awk '{ print $1 ":" $2 }'
 }
 
 # Print a wall-clock duration for a named step so the smoke test can report timings.

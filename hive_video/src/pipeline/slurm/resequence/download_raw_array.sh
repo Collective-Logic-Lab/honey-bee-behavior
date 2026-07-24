@@ -3,10 +3,11 @@
 #
 #   sbatch src/pipeline/slurm/resequence/download_raw_array.sh
 #
-# The default locator list covers the three files for the Day 4 / Day 47 top
-# comparison. Override it, and the array bound, to fetch anything else:
+# The default locator list covers the three files for the Start 04 / Start 47 top
+# comparison. A locator uses the archive capture identifier, side, and panel.
+# Override it, and the array bound, to fetch anything else:
 #
-#   sbatch --array=0-1 --export=ALL,LOCATORS="day3_side0_top day3_side1_top" \
+#   sbatch --array=0-1 --export=ALL,LOCATORS="start3_side0_top start3_side1_top" \
 #       src/pipeline/slurm/resequence/download_raw_array.sh
 #
 # Downloads are resumable and checksum-verified, so re-running a failed task is
@@ -33,8 +34,8 @@ export HIVE_VIDEO_ROOT=${HIVE_VIDEO_ROOT:-${SLURM_SUBMIT_DIR:-${PWD}}}
 SCRIPT_DIR="${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence"
 source "${SCRIPT_DIR}/common.sh"
 
-# Day 4 side 1 top, plus both Day 47 tops.
-LOCATORS=${LOCATORS:-"day4_side1_top day47_side0_top day47_side1_top"}
+# Start 04 side 1 top, plus both Start 47 tops.
+LOCATORS=${LOCATORS:-"start4_side1_top start47_side0_top start47_side1_top"}
 
 hv_sync_env
 

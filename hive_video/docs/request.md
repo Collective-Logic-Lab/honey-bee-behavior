@@ -1,10 +1,10 @@
 # Request
 
-Hi Peter. I want to start comparing the animations with the actual videos, I'm mainly looking at Day 4 and 47 ; 2019-06-09 and 2019-07-22. 
+Hi Peter. I want to start comparing the animations with the actual videos, I'm mainly looking at Start 04 and Start 47; 2019-06-09 and 2019-07-31.
 
 1.1.
 
- We already have the Day 4 re-sequenced video of side 0 top. If possible can you also please upload side 1 top of Day 4.
+ We already have the Start 04 re-sequenced video of side 0 top. If possible can you also please upload side 1 top of Start 04.
 
 1.2.
 
@@ -12,7 +12,7 @@ Hi Peter. I want to start comparing the animations with the actual videos, I'm m
     
 1.3.
 
-    side1 tops of Day 47? 
+    side1 tops of Start 47?
 
 2. Also could you please compress the videos a bit, I am running out of storage 🙃.
 
@@ -22,7 +22,7 @@ We will perform the tasks under number 1, see how they work, and then consider n
 
 For request number 1:
 
-- First please develop an download_raw.py module that takes a day (number) and side (0, 1) and framename (top, middle, bottom) OR a filename and downloads it to CWD or optional --target folder.
+- First please develop an download_raw.py module that takes a start number, side (0, 1), and panel (top, bottom) OR a filename and downloads it to CWD or optional --target folder.
 
 - Then, please build a slurm script that uses that module to download each of the three files to /scratch/pdressla/honey-bee/downloads/, using a job array of CPUs. Suggest considering a small memory request for the download process (but single CPUs will be fine). Note that the script will need to be able to take a file locator prefix compatible with our downloader, which is welcome to modify any aspect of the file naming for systematic convenience.
 

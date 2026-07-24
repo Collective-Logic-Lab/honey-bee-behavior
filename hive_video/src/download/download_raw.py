@@ -9,9 +9,9 @@ Files are named on the archive like::
     start47__20190731_184423_side1_top.mp4
 
 This module addresses them either by the archive filename or by the
-``day`` / ``side`` / ``frame`` triple, where ``day`` is the literal start
-index (``--day 47`` selects ``start47``). It also exposes a canonical *key*
-used everywhere downstream::
+``start`` / ``side`` / ``panel`` triple, where ``start`` is the archive's
+sequential capture identifier (``--start 47`` selects ``start47``). It also
+exposes a canonical *key* used everywhere downstream::
 
     start47_20190731_184423_side1_top
 
@@ -22,7 +22,7 @@ every later path from it.
 Examples::
 
     # Download one file into the current directory.
-    uv run python src/download/download_raw.py --day 4 --side 1 --frame top
+    uv run python src/download/download_raw.py --start 4 --side 1 --panel top
 
     # Download by archive filename into an explicit target.
     uv run python src/download/download_raw.py \\
@@ -30,7 +30,7 @@ Examples::
         --target /scratch/pdressla/honey-bee/downloads
 
     # Resolve a slurm locator to its key and local path without downloading.
-    uv run python src/download/download_raw.py --locator day47_side1_top --resolve-only
+    uv run python src/download/download_raw.py --locator start47_side1_top --resolve-only
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -54,10 +55,13 @@ DEFAULT_DOI = "doi:10.17617/3.LLWRWR"
 
 # start47__20190731_184423_side1_top.mp4
 FILENAME_RE = re.compile(
-    r"^start(?P<day>\d+)__(?P<date>\d{8})_(?P<time>\d{6})_side(?P<side>\d)_(?P<frame>[a-z]+)\.mp4$"
+    r"^start(?P<start>\d+)__(?P<date>\d{8})_(?P<time>\d{6})_"
+    r"side(?P<side>\d)_(?P<panel>[a-z]+)\.mp4$"
 )
-# day47_side1_top
-LOCATOR_RE = re.compile(r"^day(?P<day>\d+)_side(?P<side>\d)_(?P<frame>[a-z]+)$")
+# start47_side1_top
+LOCATOR_RE = re.compile(
+    r"^start(?P<start>\d+)_side(?P<side>[01])_(?P<panel>top|bottom)$"
+)
 
 CHUNK_BYTES = 8 * 1024 * 1024
 USER_AGENT = "hive-video-download-raw/1.0"
@@ -71,21 +75,21 @@ class RemoteFile:
     filename: str
     size: int
     md5: str
-    day: int
+    start: int
     date: str
     time: str
     side: int
-    frame: str
+    panel: str
 
     @property
     def key(self) -> str:
         """Canonical key, e.g. ``start47_20190731_184423_side1_top``."""
-        return f"start{self.day:02d}_{self.date}_{self.time}_side{self.side}_{self.frame}"
+        return f"start{self.start:02d}_{self.date}_{self.time}_side{self.side}_{self.panel}"
 
     @property
     def locator(self) -> str:
-        """Compact slurm-friendly locator, e.g. ``day47_side1_top``."""
-        return f"day{self.day}_side{self.side}_{self.frame}"
+        """Compact slurm-friendly locator, e.g. ``start47_side1_top``."""
+        return f"start{self.start}_side{self.side}_{self.panel}"
 
     @property
     def reseq_dirname(self) -> str:
@@ -129,14 +133,28 @@ def load_manifest(
     if cache_path.exists() and not refresh:
         try:
             raw = json.loads(cache_path.read_text())
+            if not isinstance(raw, list):
+                raw = None
         except (OSError, json.JSONDecodeError):
             raw = None
     if raw is None:
         raw = fetch_manifest(server, doi, timeout)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(raw))
-        tmp.replace(cache_path)
+        tmp: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                dir=cache_path.parent,
+                prefix=f".{cache_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                json.dump(raw, handle)
+                tmp = Path(handle.name)
+            tmp.replace(cache_path)
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
 
     files: list[RemoteFile] = []
     for entry in raw:
@@ -150,12 +168,15 @@ def load_manifest(
                 file_id=int(data_file["id"]),
                 filename=name,
                 size=int(data_file.get("filesize", 0)),
-                md5=str(data_file.get("md5", "")),
-                day=int(match.group("day")),
+                md5=str(
+                    data_file.get("md5")
+                    or data_file.get("checksum", {}).get("value", "")
+                ),
+                start=int(match.group("start")),
                 date=match.group("date"),
                 time=match.group("time"),
                 side=int(match.group("side")),
-                frame=match.group("frame"),
+                panel=match.group("panel"),
             )
         )
     return files
@@ -164,9 +185,9 @@ def load_manifest(
 def select_file(
     files: list[RemoteFile],
     filename: str | None,
-    day: int | None,
+    start: int | None,
     side: int | None,
-    frame: str | None,
+    panel: str | None,
 ) -> RemoteFile:
     """Resolve a single archive file, failing loudly when the request is ambiguous."""
     if filename is not None:
@@ -175,22 +196,24 @@ def select_file(
                 return candidate
         raise SystemExit(f"No archive file named {filename!r} in this dataset.")
 
-    matches = [f for f in files if f.day == day and f.side == side and f.frame == frame]
+    matches = [
+        f for f in files if f.start == start and f.side == side and f.panel == panel
+    ]
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        for_day = [f for f in files if f.day == day]
-        if not for_day:
-            days = sorted({f.day for f in files})
+        for_start = [f for f in files if f.start == start]
+        if not for_start:
+            starts = sorted({f.start for f in files})
             raise SystemExit(
-                f"No start{day:02d} in this dataset. Available start indices: "
-                f"{days[0]}-{days[-1]} ({len(days)} captures)."
+                f"No start{start:02d} in this dataset. Available start identifiers: "
+                f"{starts[0]}-{starts[-1]} ({len(starts)} captures)."
             )
-        sides = sorted({f.side for f in for_day})
-        frames = sorted({f.frame for f in for_day})
+        sides = sorted({f.side for f in for_start})
+        panels = sorted({f.panel for f in for_start})
         raise SystemExit(
-            f"No start{day:02d} side{side} {frame!r}. For start{day:02d} the archive has "
-            f"sides {sides} and frames {frames}."
+            f"No start{start:02d} side{side} {panel!r}. For start{start:02d} the archive has "
+            f"sides {sides} and panels {panels}."
         )
     names = ", ".join(f.filename for f in matches)
     raise SystemExit(f"Ambiguous selection, matched several files: {names}")
@@ -282,39 +305,50 @@ def download(
 
 
 def resolve_selection(args: argparse.Namespace) -> tuple[int | None, int | None, str | None]:
-    """Normalise --locator into the day/side/frame triple."""
+    """Normalise --locator into the start/side/panel triple."""
     if args.locator is not None:
         match = LOCATOR_RE.match(args.locator)
         if match is None:
             raise SystemExit(
-                f"Could not parse locator {args.locator!r}. Expected e.g. 'day47_side1_top'."
+                f"Could not parse locator {args.locator!r}. "
+                "Expected e.g. 'start47_side1_top'."
             )
-        return int(match.group("day")), int(match.group("side")), match.group("frame")
-    return args.day, args.side, args.frame
+        return (
+            int(match.group("start")),
+            int(match.group("side")),
+            match.group("panel"),
+        )
+    return args.start, args.side, args.panel
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Download a raw 2019 hive video from the Edmond archive by day/side/frame "
+            "Download a raw 2019 hive video from the Edmond archive by start/side/panel "
             "or by archive filename."
         )
     )
     selector = parser.add_argument_group("file selection")
     selector.add_argument(
-        "--day",
+        "--start",
         type=int,
-        help="Literal capture start index: --day 47 selects start47.",
+        help="Sequential archive capture identifier: --start 47 selects start47.",
     )
     selector.add_argument("--side", type=int, choices=(0, 1), help="Hive side.")
     selector.add_argument(
+        "--panel",
         "--frame",
-        help="Camera frame position. The 2019 archive provides 'top' and 'bottom'.",
+        dest="panel",
+        choices=("top", "bottom"),
+        help="Camera panel. --frame is accepted as a compatibility alias.",
     )
-    selector.add_argument("--filename", help="Exact archive filename, overrides day/side/frame.")
+    selector.add_argument(
+        "--filename",
+        help="Exact archive filename, overrides start/side/panel.",
+    )
     selector.add_argument(
         "--locator",
-        help="Compact locator used by the slurm arrays, e.g. 'day47_side1_top'.",
+        help="Compact locator used by the slurm arrays, e.g. 'start47_side1_top'.",
     )
 
     parser.add_argument(
@@ -366,15 +400,17 @@ def main() -> int:
     files = load_manifest(args.server, args.doi, cache_path, args.refresh_manifest, args.timeout)
 
     if args.list:
-        for entry in sorted(files, key=lambda f: (f.day, f.side, f.frame)):
+        for entry in sorted(files, key=lambda f: (f.start, f.side, f.panel)):
             print(f"{entry.key}\t{entry.locator}\t{entry.size / 1e9:.1f}GB\t{entry.filename}")
         return 0
 
-    day, side, frame = resolve_selection(args)
-    if args.filename is None and (day is None or side is None or frame is None):
-        raise SystemExit("Specify --filename, or --locator, or all of --day, --side and --frame.")
+    start, side, panel = resolve_selection(args)
+    if args.filename is None and (start is None or side is None or panel is None):
+        raise SystemExit(
+            "Specify --filename, or --locator, or all of --start, --side and --panel."
+        )
 
-    remote = select_file(files, args.filename, day, side, frame)
+    remote = select_file(files, args.filename, start, side, panel)
     destination = args.target.expanduser() / remote.filename
 
     if args.resolve_only:

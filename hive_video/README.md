@@ -72,27 +72,24 @@ Run the Slurm commands in this section from the `hive_video/` checkout root.
 The jobs use Slurm's recorded submission directory to locate their shared
 scripts after Slurm copies the submitted script into its spool directory.
 
-Pulls the three Day 4 / Day 47 top videos from the Edmond archive
+Pulls the three Start 04 / Start 47 top-panel videos from the Edmond archive
 (doi:10.17617/3.LLWRWR) into `/scratch/pdressla/honey-bee/downloads/`. Transfers
 resume and are MD5-checked, so re-running a failed task is safe. For other
-files, pass locators of the form `day<N>_side<0|1>_<top|bottom>`, where `N` is
-the capture start index (`day47` is `start47`).
+files, pass locators of the form `start<N>_side<0|1>_<top|bottom>`.
 
-Day numbers are capture identifiers, not elapsed calendar days. The two agree
-early on but diverge from `start09`, because there are gaps in the recording
-sequence: `start47` was recorded on 2019-07-31, which is the 56th day after
-`start00`. The lab refers to captures by identifier, so `--day 47` always means
-`start47`. Use `--list` if you need to check a date.
+`start<N>` is the archive's sequential capture identifier, not an elapsed
+calendar day. The timestamp embedded in the resolved filename is authoritative;
+use `--list` to inspect the complete mapping.
 
 ```bash
-sbatch --array=0-1 --export=ALL,LOCATORS="day3_side0_top day3_side1_top" \
+sbatch --array=0-1 --export=ALL,LOCATORS="start3_side0_top start3_side1_top" \
     src/pipeline/slurm/resequence/download_raw_array.sh
 ```
 
 To grab one file outside slurm:
 
 ```bash
-uv run python src/download/download_raw.py --day 4 --side 1 --frame top \
+uv run python src/download/download_raw.py --start 4 --side 1 --panel top \
     --target /scratch/pdressla/honey-bee/downloads
 uv run python src/download/download_raw.py --list   # everything in the archive
 ```
@@ -103,32 +100,35 @@ uv run python src/download/download_raw.py --list   # everything in the archive
 sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh
 ```
 
-Times detection over 20,000 frames and projects the full-length cost. The wall
-clocks in the stage scripts are placeholders until this has run.
+Runs the full path over 20,000 frames and reports separate detection, ordering,
+review-video, and reassembly timings. The wall clocks in the stage scripts are
+placeholders until this has run.
 
-#### 3. Stage 1, up to the join review
+#### 3. Stage 1, up to the cut review
 
 ```bash
 sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh
 ```
 
-Runs detection, event summarisation, segment building, ordering, and the join
-review video. Each step is skipped if its output already exists, so a task that
-hits the wall clock resumes on resubmission.
+Runs detection and event summarisation, then writes
+`qc/cut_review.proposed.csv`. Single-jump events default to `keep=1`, matching
+the established Start03/Start04 procedure; multi-jump events remain visible
+with `keep=0`. Successful steps receive completion markers, so a task killed
+while writing output reruns that step.
 
-#### 4. Check the joins by hand
+#### 4. Check the cuts by hand
 
-Stage 1 stops at `review/join_review_rank1.mp4`: short clips of each segment
-ending followed by the proposed next segment start, separated by a green flash.
-Boundary detection is never clean, so watch it, correct the ordering, and save
-the result as:
+Inspect `qc/candidates/`, `qc/jump_events.csv`, and
+`qc/cut_review.proposed.csv`. Boundary detection is never clean: change
+`keep`, correct `prev_frame_idx`, and add diagnosed cuts when needed. Save the
+reviewed table as:
 
 ```text
-<work dir>/order/greedy_order.verified.csv
+<work dir>/qc/cut_review.verified.csv
 ```
 
-If the automatic ordering was already right, copy it across unchanged. Stage 2
-refuses to start without this file, so the check cannot be skipped by accident.
+If all proposed cuts are correct, copy the proposed table unchanged. Stage 2
+refuses to start without the verified file.
 
 #### 5. Stage 2, reassemble and back up
 
@@ -136,8 +136,10 @@ refuses to start without this file, so the check cannot be skipped by accident.
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
 
-Renders the verified ordering, and queues a dependent job that publishes the
-finished MP4 plus the segment and ordering CSVs to
+Builds segments from the verified cuts, applies the established trajectory
+signature with 10-frame windows, creates a green-flash review containing every
+join in that exact greedy order, and renders it. A dependent job publishes the
+validated MP4 and its audit artifacts to
 `hf://buckets/collective-logic-lab/honey-bee/resequenced/reseq_<key>`. The
 backup runs on its own wall clock so it is not competing with the reassembly.
 Uploading needs write access to the bucket: run `hf auth login` on the cluster
@@ -153,8 +155,8 @@ Work for one video lives under
 | --- | --- |
 | `qc/` | discontinuity candidates and jump events |
 | `segments/` | segment definitions |
-| `order/` | ranked joins, proposed and verified orderings |
-| `review/` | the green-flash join review video |
+| `order/` | ranked joins and the trajectory-10 greedy order |
+| `review/` | every join in the exact rendered order |
 | `output/` | the reassembled MP4 and its frame map |
 | `upload/` | exactly what gets published to HuggingFace |
 

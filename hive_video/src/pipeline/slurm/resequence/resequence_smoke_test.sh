@@ -3,16 +3,16 @@
 #
 #   sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh
 #
-# Runs discontinuity detection over a bounded slice of one real video, times it,
-# and projects the full-length cost so the wall clocks in the stage scripts can
-# be set from measurement rather than guesswork. The stage script defaults
-# (24h for stage 1, 48h for stage 2) are placeholders until this has run.
+# Runs the full pipeline over a bounded slice of one real video and reports
+# separate detection, ordering, review, and reassembly timings. The cut review
+# uses the single-jump proposal automatically for timing only; it is not a
+# substitute for the manual production gate.
 #
 # Nothing here writes into the real work directory; everything lands under
 # <work dir>/smoke so it cannot be mistaken for a production artifact.
 #
 #   SMOKE_FRAMES   frames to decode before stopping (default 20000)
-#   SMOKE_LOCATOR  which video to probe (default day4_side1_top)
+#   SMOKE_LOCATOR  which video to probe (default start4_side1_top)
 
 #SBATCH --job-name=bees-reseq-smoke
 #SBATCH --cpus-per-task=8
@@ -35,7 +35,7 @@ SCRIPT_DIR="${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence"
 source "${SCRIPT_DIR}/common.sh"
 
 SMOKE_FRAMES=${SMOKE_FRAMES:-20000}
-SMOKE_LOCATOR=${SMOKE_LOCATOR:-day4_side1_top}
+SMOKE_LOCATOR=${SMOKE_LOCATOR:-start4_side1_top}
 
 hv_sync_env
 hv_resolve "${SMOKE_LOCATOR}"
@@ -81,16 +81,56 @@ hv_time_step "detect_${SMOKE_FRAMES}_frames" \
     "${RESEQ_PATH}" \
     --out "${SMOKE_DIR}/qc" \
     --max-frames "${SMOKE_FRAMES}" \
+    --top-n "${TOP_N:-400}" \
     --progress-every-seconds "${PROGRESS_EVERY_SECONDS:-60}"
 
-if [ -f "${SMOKE_DIR}/qc/candidates.csv" ]; then
-  hv_time_step "summarize_jump_events" \
-    uv run --no-sync python src/resequence/summarize_jump_events.py \
-      --candidates "${SMOKE_DIR}/qc/candidates.csv" \
-      --out "${SMOKE_DIR}/qc/jump_events.csv"
-fi
+hv_time_step "summarize_jump_events" \
+  uv run --no-sync python src/resequence/summarize_jump_events.py \
+    --candidates "${SMOKE_DIR}/qc/candidates.csv" \
+    --out "${SMOKE_DIR}/qc/jump_events.csv"
+
+hv_time_step "prepare_cut_review" \
+  uv run --no-sync python src/resequence/prepare_cut_review.py \
+    --events "${SMOKE_DIR}/qc/jump_events.csv" \
+    --out "${SMOKE_DIR}/qc/cut_review.smoke.csv"
+
+hv_time_step "build_segments" \
+  uv run --no-sync python src/resequence/build_segments_from_jumps.py \
+    "${RESEQ_PATH}" \
+    --jumps "${SMOKE_DIR}/qc/cut_review.smoke.csv" \
+    --input-kind cut-review \
+    --frame-count "${SMOKE_FRAMES}" \
+    --out "${SMOKE_DIR}/segments/segments.csv"
+
+hv_time_step "order_segments" \
+  uv run --no-sync python src/resequence/order_video_segments.py \
+    --segments "${SMOKE_DIR}/segments/segments.csv" \
+    --out "${SMOKE_DIR}/order" \
+    --window-frames 10 \
+    --signature trajectory \
+    --top-k 10
+
+hv_time_step "join_review_video" \
+  uv run --no-sync python src/resequence/diagnostics/make_join_review_video.py \
+    "${RESEQ_PATH}" \
+    --ranked-edges "${SMOKE_DIR}/order/ranked_edges.csv" \
+    --segments "${SMOKE_DIR}/segments/segments.csv" \
+    --order-csv "${SMOKE_DIR}/order/greedy_order.csv" \
+    --out "${SMOKE_DIR}/review/join_review_greedy_order.mp4" \
+    --seconds-each-side 0.5
+
+hv_time_step "reassemble_${SMOKE_FRAMES}_frames" \
+  uv run --no-sync python src/resequence/reassemble_video_from_segments.py \
+    --segments "${SMOKE_DIR}/segments/segments.csv" \
+    --ranked-edges "${SMOKE_DIR}/order/ranked_edges.csv" \
+    --order-csv "${SMOKE_DIR}/order/greedy_order.csv" \
+    --require-complete-order \
+    --out "${SMOKE_DIR}/output/reseq_smoke.mp4" \
+    --safeword-file "${SMOKE_DIR}/.safeword" \
+    --segment-chunk-size 2
 
 DETECT_SECONDS=$(awk -F'\t' '$1 ~ /^detect_/ { print $2 }' "${HV_TIMING_LOG}")
+REASSEMBLE_SECONDS=$(awk -F'\t' '$1 ~ /^reassemble_/ { print $2 }' "${HV_TIMING_LOG}")
 
 echo
 echo "=================================================="
@@ -111,9 +151,21 @@ BEGIN {
   printf "projected full detect : %.1f hours (%d frames)\n", projected / 3600.0, total;
   printf "\n";
   printf "Suggested stage 1 wall clock: %.0f hours\n", (projected / 3600.0) * 2.0 + 1;
-  printf "  (2x the detection projection plus an hour; ordering and the join\n";
-  printf "   review video are small next to detection, but the segment count\n";
-  printf "   drives ordering cost, so re-check after a real run.)\n";
+  printf "  (2x the detection projection plus an hour.)\n";
+}'
+
+awk -v secs="${REASSEMBLE_SECONDS:-0}" -v frames="${SMOKE_FRAMES}" -v total="${TOTAL_FRAMES}" '
+BEGIN {
+  if (secs <= 0 || total <= 0) {
+    print "Not enough information to project reassembly.";
+    exit
+  }
+  rate = frames / secs;
+  projected = total / rate;
+  printf "reassembly rate        : %.1f frames/s\n", rate;
+  printf "projected reassembly   : %.1f hours (%d frames)\n", projected / 3600.0, total;
+  printf "Suggested stage 2 floor: %.0f hours\n", (projected / 3600.0) * 2.0 + 2;
+  printf "  (2x reassembly plus two hours; add the observed ordering and review times.)\n";
 }'
 
 echo

@@ -13,23 +13,23 @@ from a single locator, and stop at the one point that needs a human:
 
 ```bash
 sbatch src/pipeline/slurm/resequence/download_raw_array.sh       # fetch raw video from Edmond
-sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh    # time it, then set wall clocks
-sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # steps 1-4 plus the join review
+sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh    # time the bounded full path
+sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and cut proposal
 
-# watch review/join_review_rank1.mp4, fix the ordering, then:
-#   cp order/greedy_order.csv order/greedy_order.verified.csv
+# inspect qc/candidates and qc/cut_review.proposed.csv, then save:
+#   qc/cut_review.verified.csv
 
-sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # step 5, then upload to HuggingFace
+sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # steps 3-5, then upload
 ```
 
-Stage 1 covers steps 1 through 4 below and then builds the join review video.
-Stage 2 runs step 5, and will not start until `greedy_order.verified.csv`
-exists. Both stages skip work whose output is already present, so resubmitting
-after a wall-clock kill resumes rather than restarting.
+Stage 1 covers steps 1 and 2 below and prepares an editable cut table. Stage 2
+will not start until `cut_review.verified.csv` exists; it then covers steps 3
+through 5 with the established trajectory-10 ordering. Completed steps and
+validated video parts resume safely after a wall-clock kill.
 
 `src/pipeline/slurm/resequence/common.sh` holds the shared environment, the uv
 scratch-venv locking, and `hv_resolve`, which turns a locator such as
-`day47_side1_top` into the raw video path, the canonical key, and every work
+`start47_side1_top` into the raw video path, the canonical key, and every work
 directory. The full walkthrough, including how to select other files, is in
 `hive_video/README.md`.
 

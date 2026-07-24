@@ -8,8 +8,9 @@
 # HV_UPLOAD_WORK_DIR=/scratch/pdressla/honey-bee/artifacts/resequence/reseq_start47_20190731_184423_side1_top \
 #       src/pipeline/slurm/resequence/resequence_upload.sh
 #
-# Uploads the final MP4 plus the segment and ordering CSVs that make the
-# resequencing reproducible. QC and detection artifacts stay on scratch.
+# Uploads the final MP4 plus the verified cuts, segment definitions, ordering,
+# frame mapping, and metadata needed to audit the resequencing. Detection
+# images and intermediate part videos stay on scratch.
 #
 # The bucket is public to read but writing needs a token. Log in once on the
 # cluster with `hf auth login`, or set HF_TOKEN in the job environment.
@@ -44,10 +45,19 @@ hv_sync_env
 WORK_DIR="${HV_UPLOAD_WORK_DIR}"
 KEY="${HV_UPLOAD_KEY}"
 FINAL_VIDEO="${WORK_DIR}/output/reseq_${KEY}.mp4"
+FINAL_MAPPING="${WORK_DIR}/output/reseq_${KEY}.frame_mapping.csv"
+FINAL_METADATA="${WORK_DIR}/output/reseq_${KEY}.metadata.json"
+FINAL_ORDER="${WORK_DIR}/output/reseq_${KEY}.order.csv"
+PARTS_MANIFEST="${WORK_DIR}/output/reseq_${KEY}.parts_manifest.csv"
 STAGING="${WORK_DIR}/upload"
 REMOTE="${HF_RESEQ_PREFIX}/reseq_${KEY}"
+REMOTE_PREFIX="${REMOTE#${HF_BUCKET}/}"
+REMOTE_LISTING="${WORK_DIR}/upload.remote_listing.json"
 
 hv_require_file "${FINAL_VIDEO}" "Stage 2 has not produced a final video for ${KEY}."
+hv_require_file "${FINAL_MAPPING}" "Stage 2 has not produced a frame mapping for ${KEY}."
+hv_require_file "${FINAL_METADATA}" "Stage 2 has not produced metadata for ${KEY}."
+hv_require_file "${FINAL_ORDER}" "Stage 2 has not produced its resolved order for ${KEY}."
 
 # Check credentials before staging: copying a 33 GB MP4 and only then finding
 # out there is no write token is an expensive way to fail.
@@ -56,31 +66,27 @@ if [ -z "${HF_TOKEN:-}" ] && [ ! -f "${HF_HOME:-${HOME}/.cache/huggingface}/toke
   echo "Set HF_TOKEN in the job environment, or run 'hf auth login' on the cluster." >&2
   exit 5
 fi
+echo "Checking Hugging Face identity"
+uv run --no-sync hf auth whoami --format json
 
 # Stage exactly what should be published, so the sync cannot sweep up the
 # large QC artifacts or leftover part files sitting in the work directory.
 rm -rf "${STAGING}"
 mkdir -p "${STAGING}"
-cp "${FINAL_VIDEO}" "${STAGING}/"
+cp "${FINAL_VIDEO}" "${FINAL_MAPPING}" "${FINAL_METADATA}" "${FINAL_ORDER}" "${STAGING}/"
+if [ -f "${PARTS_MANIFEST}" ]; then
+  cp "${PARTS_MANIFEST}" "${STAGING}/"
+fi
 
 for extra in \
-  "${WORK_DIR}/output/reseq_${KEY}_frame_map.csv" \
+  "${WORK_DIR}/qc/cut_review.verified.csv" \
   "${WORK_DIR}/segments/segments.csv" \
   "${WORK_DIR}/order/ranked_edges.csv" \
-  "${WORK_DIR}/order/greedy_order.csv" \
-  "${WORK_DIR}/order/greedy_order.verified.csv"; do
+  "${WORK_DIR}/order/greedy_order.csv"; do
   if [ -f "${extra}" ]; then
     cp "${extra}" "${STAGING}/"
   else
     echo "note: ${extra} not present, skipping"
-  fi
-done
-
-# reassemble_video_from_segments writes a frame mapping alongside the MP4; its
-# exact name depends on the output path, so catch any stragglers.
-for mapping in "${WORK_DIR}"/output/*.csv; do
-  if [ -f "${mapping}" ] && [ ! -f "${STAGING}/$(basename "${mapping}")" ]; then
-    cp "${mapping}" "${STAGING}/"
   fi
 done
 
@@ -90,15 +96,18 @@ cat >"${STAGING}/README.md" <<EOF
 Resequenced hive video produced by \`hive_video/src/resequence\`.
 
 - Source archive: doi:10.17617/3.LLWRWR (Edmond), file \`${KEY}\`
-- Segment ordering was verified by hand against the join review video.
+- Discontinuity cuts were verified by hand against the detector outputs.
+- Segment ordering used the established trajectory-10 greedy procedure.
 
 Contents:
 
 - \`reseq_${KEY}.mp4\` - the reassembled video
+- \`reseq_${KEY}.frame_mapping.csv\` - output-to-source frame mapping
+- \`reseq_${KEY}.metadata.json\` - resolved render settings and completion status
+- \`cut_review.verified.csv\` - the hand-checked source cuts
 - \`segments.csv\` - source segment boundaries
 - \`ranked_edges.csv\` - candidate joins with scores
-- \`greedy_order.csv\` - automatic ordering proposal
-- \`greedy_order.verified.csv\` - the hand-checked ordering actually rendered
+- \`greedy_order.csv\` - the automatic ordering rendered
 EOF
 
 echo "Uploading ${STAGING} -> ${REMOTE}"
@@ -114,4 +123,19 @@ printf '\n'
 
 hv_time_step "hf_sync" "${HF_CMD[@]}"
 
-echo "Backed up ${KEY} to ${REMOTE}"
+if [ "${DRY_RUN:-0}" = "1" ]; then
+  echo "Dry run complete; nothing was uploaded."
+  exit 0
+fi
+
+echo "Listing remote destination for byte-size verification"
+uv run --no-sync hf buckets list "${REMOTE}" --recursive --format json \
+  >"${REMOTE_LISTING}.partial"
+mv "${REMOTE_LISTING}.partial" "${REMOTE_LISTING}"
+
+uv run --no-sync python src/utils/verify_bucket_listing.py \
+  --local-dir "${STAGING}" \
+  --listing "${REMOTE_LISTING}" \
+  --remote-prefix "${REMOTE_PREFIX}"
+
+echo "Backed up and remotely verified ${KEY} at ${REMOTE}"

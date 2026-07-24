@@ -15,16 +15,48 @@ from PIL import Image, ImageDraw, ImageFont
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a review MP4 from ranked segment joins. Each join shows a short clip before "
-            "the source segment end followed by a short clip after the candidate next segment start."
+            "Build a review MP4 from ranked segment joins. Each join shows a short "
+            "clip before the source segment end followed by a short clip after the "
+            "candidate next segment start."
         )
     )
     parser.add_argument("video", type=Path, help="Source MP4.")
     parser.add_argument("--ranked-edges", type=Path, required=True, help="ranked_edges.csv.")
+    parser.add_argument(
+        "--segments",
+        type=Path,
+        help="segments.csv; required with --order-csv.",
+    )
+    parser.add_argument(
+        "--order-csv",
+        type=Path,
+        help=(
+            "Review the exact consecutive joins in this proposed order. Requires "
+            "--segments and includes every join unless --limit is set."
+        ),
+    )
     parser.add_argument("--out", type=Path, required=True, help="Output review MP4.")
-    parser.add_argument("--rank", type=int, default=1, help="Which rank_for_from_segment to review.")
-    parser.add_argument("--limit", type=int, default=20, help="Maximum number of joins to include.")
-    parser.add_argument("--seconds-each-side", type=float, default=2.0, help="Clip seconds per side.")
+    parser.add_argument(
+        "--rank",
+        type=int,
+        default=1,
+        help="Which rank_for_from_segment to review.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Maximum joins to include. Candidate-rank review defaults to 20; exact-order "
+            "review defaults to all joins."
+        ),
+    )
+    parser.add_argument(
+        "--seconds-each-side",
+        type=float,
+        default=2.0,
+        help="Clip seconds per side.",
+    )
     parser.add_argument("--fps", type=float, default=25.0, help="Video frame rate.")
     parser.add_argument(
         "--scale-width",
@@ -55,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_edges(path: Path, rank: int, limit: int) -> list[dict]:
+def read_edges(path: Path, rank: int, limit: int | None) -> list[dict]:
     rows = []
     with path.open() as f:
         for row in csv.DictReader(f):
@@ -68,7 +100,71 @@ def read_edges(path: Path, rank: int, limit: int) -> list[dict]:
             row["mean_abs_diff"] = float(row["mean_abs_diff"])
             rows.append(row)
     rows.sort(key=lambda row: row["from_segment_id"])
-    return rows[:limit]
+    return rows if limit is None else rows[:limit]
+
+
+def read_order_edges(
+    segments_path: Path,
+    order_path: Path,
+    ranked_edges_path: Path,
+    limit: int | None,
+) -> list[dict]:
+    segments: dict[int, dict[str, int]] = {}
+    with segments_path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            segment_id = int(row["segment_id"])
+            if segment_id in segments:
+                raise ValueError(f"Duplicate segment_id {segment_id} in {segments_path}")
+            segments[segment_id] = {
+                "start_frame_idx": int(row["start_frame_idx"]),
+                "end_frame_idx": int(row["end_frame_idx"]),
+            }
+
+    order: list[tuple[int, int]] = []
+    with order_path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            order.append((int(row["order"]), int(row["segment_id"])))
+    order.sort()
+    if len(order) < 2:
+        raise ValueError(f"Order must contain at least two segments: {order_path}")
+    order_values = [row[0] for row in order]
+    if order_values != list(range(len(order))):
+        raise ValueError(
+            f"Order values must be contiguous 0..{len(order) - 1}, got {order_values}"
+        )
+    segment_ids = [row[1] for row in order]
+    if len(segment_ids) != len(set(segment_ids)):
+        raise ValueError(f"Order contains duplicate segment IDs: {order_path}")
+    missing = sorted(set(segment_ids) - set(segments))
+    if missing:
+        raise ValueError(f"Order references unknown segment IDs {missing}: {order_path}")
+    omitted = sorted(set(segments) - set(segment_ids))
+    if omitted:
+        raise ValueError(f"Order omits segment IDs {omitted}: {order_path}")
+
+    ranked: dict[tuple[int, int], dict[str, float | int]] = {}
+    with ranked_edges_path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            key = (int(row["from_segment_id"]), int(row["to_segment_id"]))
+            ranked[key] = {
+                "rank_for_from_segment": int(row["rank_for_from_segment"]),
+                "mean_abs_diff": float(row["mean_abs_diff"]),
+            }
+
+    edges = []
+    for from_segment_id, to_segment_id in zip(segment_ids, segment_ids[1:]):
+        score = ranked.get((from_segment_id, to_segment_id), {})
+        edges.append(
+            {
+                "from_segment_id": from_segment_id,
+                "to_segment_id": to_segment_id,
+                "from_end_frame_idx": segments[from_segment_id]["end_frame_idx"],
+                "to_start_frame_idx": segments[to_segment_id]["start_frame_idx"],
+                "rank_for_from_segment": score.get("rank_for_from_segment"),
+                "mean_abs_diff": score.get("mean_abs_diff"),
+            }
+        )
+    return edges if limit is None else edges[:limit]
 
 
 def ffmpeg_escape_text(text: str) -> str:
@@ -213,7 +309,14 @@ def write_caption_manifest(path: Path, rows: list[dict]) -> None:
     import csv
 
     with path.open("w", newline="") as f:
-        fieldnames = ["clip_index", "join_index", "side", "review_start_s", "review_stop_s", "caption"]
+        fieldnames = [
+            "clip_index",
+            "join_index",
+            "side",
+            "review_start_s",
+            "review_stop_s",
+            "caption",
+        ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
@@ -226,9 +329,25 @@ def main() -> None:
     out = args.out.expanduser().resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    edges = read_edges(ranked_edges, args.rank, args.limit)
+    if (args.order_csv is None) != (args.segments is None):
+        raise ValueError("--order-csv and --segments must be provided together")
+    if args.order_csv is not None:
+        edges = read_order_edges(
+            args.segments.expanduser().resolve(),
+            args.order_csv.expanduser().resolve(),
+            ranked_edges,
+            args.limit,
+        )
+        review_mode = "exact order"
+    else:
+        edges = read_edges(
+            ranked_edges,
+            args.rank,
+            20 if args.limit is None else args.limit,
+        )
+        review_mode = f"candidate rank {args.rank}"
     if not edges:
-        raise RuntimeError("No ranked edges matched the requested rank.")
+        raise RuntimeError(f"No joins found for {review_mode}.")
 
     if args.caption_mode == "auto":
         caption_mode = "drawtext" if ffmpeg_has_filter("drawtext") else "pillow"
@@ -247,10 +366,14 @@ def main() -> None:
         for join_index, edge in enumerate(edges, start=1):
             before_start = edge["from_end_frame_idx"] / args.fps - args.seconds_each_side
             after_start = edge["to_start_frame_idx"] / args.fps
+            rank = edge.get("rank_for_from_segment")
+            rank_text = str(rank) if rank is not None else "not-retained"
+            difference = edge.get("mean_abs_diff")
+            difference_text = f"{difference:.3f}" if difference is not None else "not-retained"
             shared = (
-                f"join {join_index:03d} rank {args.rank} "
+                f"join {join_index:03d} rank {rank_text} "
                 f"S{edge['from_segment_id']} -> S{edge['to_segment_id']} "
-                f"diff {edge['mean_abs_diff']:.3f}"
+                f"diff {difference_text}"
             )
             before_caption = (
                 f"{shared} | before end frame {edge['from_end_frame_idx']} "
@@ -352,6 +475,8 @@ def main() -> None:
 
     captions_path = out.with_suffix(".captions.csv")
     write_caption_manifest(captions_path, caption_rows)
+    print(f"review mode: {review_mode}")
+    print(f"joins: {len(edges)}")
     print(f"wrote review video: {out}")
     print(f"wrote captions: {captions_path}")
 
