@@ -1,7 +1,7 @@
 #!/bin/bash
 # Resequencing stage 2: reassemble the verified ordering, then back up to HuggingFace.
 #
-#   sbatch src/resequence/slurm/resequence_stage2_array.sh
+#   sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 #
 # Assumes stage 1 has run and that you have watched the green-flash join review
 # video and written the corrected ordering to

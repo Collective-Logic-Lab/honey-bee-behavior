@@ -65,7 +65,7 @@ submissions with one manual check in the middle, all from `hive_video/`.
 #### 1. Download the raw video
 
 ```bash
-sbatch src/resequence/slurm/download_raw_array.sh
+sbatch src/pipeline/slurm/resequence/download_raw_array.sh
 ```
 
 Pulls the three Day 4 / Day 47 top videos from the Edmond archive
@@ -82,7 +82,7 @@ sequence: `start47` was recorded on 2019-07-31, which is the 56th day after
 
 ```bash
 sbatch --array=0-1 --export=ALL,LOCATORS="day3_side0_top day3_side1_top" \
-    src/resequence/slurm/download_raw_array.sh
+    src/pipeline/slurm/resequence/download_raw_array.sh
 ```
 
 To grab one file outside slurm:
@@ -96,7 +96,7 @@ uv run python src/download/download_raw.py --list   # everything in the archive
 #### 2. Measure before booking wall clock
 
 ```bash
-sbatch src/resequence/slurm/resequence_smoke_test.sh
+sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh
 ```
 
 Times detection over 20,000 frames and projects the full-length cost. The wall
@@ -105,7 +105,7 @@ clocks in the stage scripts are placeholders until this has run.
 #### 3. Stage 1, up to the join review
 
 ```bash
-sbatch src/resequence/slurm/resequence_stage1_array.sh
+sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh
 ```
 
 Runs detection, event summarisation, segment building, ordering, and the join
@@ -129,7 +129,7 @@ refuses to start without this file, so the check cannot be skipped by accident.
 #### 5. Stage 2, reassemble and back up
 
 ```bash
-sbatch src/resequence/slurm/resequence_stage2_array.sh
+sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
 
 Renders the verified ordering, and queues a dependent job that publishes the
@@ -154,7 +154,7 @@ Work for one video lives under
 | `output/` | the reassembled MP4 and its frame map |
 | `upload/` | exactly what gets published to HuggingFace |
 
-Shared setup lives in `src/resequence/slurm/common.sh`; override
+Shared setup lives in `src/pipeline/slurm/resequence/common.sh`; override
 `HIVE_VIDEO_ROOT`, `SCRATCH_ROOT`, or `DOWNLOAD_DIR` there or in the
 environment. Detection parameters default to the tools' own defaults and can be
 overridden per submission, for example

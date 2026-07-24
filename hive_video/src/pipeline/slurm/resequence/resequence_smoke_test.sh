@@ -1,7 +1,7 @@
 #!/bin/bash
 # Timing probe for the resequencing pipeline.
 #
-#   sbatch src/resequence/slurm/resequence_smoke_test.sh
+#   sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh
 #
 # Runs discontinuity detection over a bounded slice of one real video, times it,
 # and projects the full-length cost so the wall clocks in the stage scripts can

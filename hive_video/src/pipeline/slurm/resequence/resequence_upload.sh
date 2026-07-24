@@ -6,7 +6,7 @@
 #
 #   sbatch --export=ALL,HV_UPLOAD_KEY=start47_20190731_184423_side1_top,\
 # HV_UPLOAD_WORK_DIR=/scratch/pdressla/honey-bee/artifacts/resequence/reseq_start47_20190731_184423_side1_top \
-#       src/resequence/slurm/resequence_upload.sh
+#       src/pipeline/slurm/resequence/resequence_upload.sh
 #
 # Uploads the final MP4 plus the segment and ordering CSVs that make the
 # resequencing reproducible. QC and detection artifacts stay on scratch.

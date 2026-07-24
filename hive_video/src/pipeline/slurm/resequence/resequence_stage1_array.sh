@@ -1,7 +1,7 @@
 #!/bin/bash
 # Resequencing stage 1: everything up to the manual join check.
 #
-#   sbatch src/resequence/slurm/resequence_stage1_array.sh
+#   sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh
 #
 # Runs, per array task:
 #   1. detect_video_discontinuities   -> qc/candidates.csv
@@ -22,7 +22,7 @@
 # which is what the start03 work was validated with. Override individually:
 #
 #   sbatch --export=ALL,SAMPLE_WIDTH=256,TOP_N=400 \
-#       src/resequence/slurm/resequence_stage1_array.sh
+#       src/pipeline/slurm/resequence/resequence_stage1_array.sh
 
 #SBATCH --job-name=bees-reseq1
 #SBATCH --array=0-2
