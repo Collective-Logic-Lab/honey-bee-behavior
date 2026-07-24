@@ -6,6 +6,8 @@ The current work focuses on comb-building and festoon-related behavior in the "V
 
 The videos are here: [https://edmond.mpg.de/dataset.xhtml?persistentId=doi:10.17617/3.LLWRWR](https://edmond.mpg.de/dataset.xhtml?persistentId=doi:10.17617/3.LLWRWR).
 
+Edmonds runs Dataverse. There is a schematic image for download at [https://doi.org/10.17617/3.LLWRWR](this location).
+
 ### TLDR
 
 Run this from the repository root to set up the video tools:
