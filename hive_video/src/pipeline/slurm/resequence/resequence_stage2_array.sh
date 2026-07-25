@@ -17,7 +17,7 @@
 #SBATCH --job-name=bees-reseq2
 #SBATCH --array=0-2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32GB
+#SBATCH --mem=80GB
 #SBATCH -t 48:00:00
 #SBATCH -p public
 #SBATCH -q public
