@@ -37,12 +37,13 @@ hv_require_ffmpeg
 LOCATOR="$(hv_locator_for_task "${LOCATORS}" "${SLURM_ARRAY_TASK_ID:-0}")"
 hv_resolve "${LOCATOR}"
 
+PROPOSED_CUTS="${HV_QC_DIR}/cut_review.proposed.csv"
 VERIFIED_CUTS="${HV_QC_DIR}/cut_review.verified.csv"
 SEGMENTS="${HV_SEG_DIR}/segments.csv"
 RANKED_EDGES="${HV_ORDER_DIR}/ranked_edges.csv"
 GREEDY_ORDER="${HV_ORDER_DIR}/greedy_order.csv"
-JOIN_REVIEW="${HV_REVIEW_DIR}/join_review_greedy_order.mp4"
-JOIN_CAPTIONS="${HV_REVIEW_DIR}/join_review_greedy_order.captions.csv"
+QC_ROLL="${HV_REVIEW_DIR}/qc_roll_greedy_order.mp4"
+QC_ROLL_CAPTIONS="${HV_REVIEW_DIR}/qc_roll_greedy_order.captions.csv"
 STAGE1A_DONE="${HV_REVIEW_DIR}/.stage1a.complete"
 FINAL_VIDEO="${HV_OUT_DIR}/reseq_${RESEQ_KEY}.mp4"
 FINAL_MAPPING="${HV_OUT_DIR}/reseq_${RESEQ_KEY}.frame_mapping.csv"
@@ -50,24 +51,28 @@ REASSEMBLE_DONE="${HV_OUT_DIR}/.reassemble.complete"
 REASSEMBLE_INPUTS="${HV_OUT_DIR}/.reassemble.inputs"
 
 hv_require_file "${RESEQ_PATH}" "The raw video is gone; re-run download_raw_array.sh."
-hv_require_file "${VERIFIED_CUTS}" \
-  "Stage 1a needs ${HV_QC_DIR}/cut_review.verified.csv; do not bypass the cut review."
+hv_require_file "${PROPOSED_CUTS}" "Stage 1 cut proposal is missing; rerun resequence_stage1_array.sh."
+if [ -f "${VERIFIED_CUTS}" ]; then
+  CUTS="${VERIFIED_CUTS}"
+else
+  CUTS="${PROPOSED_CUTS}"
+fi
 hv_require_file "${SEGMENTS}" \
   "Stage 1a outputs are missing; run resequence_stage1a_review_array.sh first."
 hv_require_file "${RANKED_EDGES}" \
   "Stage 1a outputs are missing; run resequence_stage1a_review_array.sh first."
 hv_require_file "${GREEDY_ORDER}" \
   "Stage 1a outputs are missing; run resequence_stage1a_review_array.sh first."
-hv_require_file "${JOIN_REVIEW}" \
-  "Stage 1a green-flash review is missing; run resequence_stage1a_review_array.sh first."
-hv_require_file "${JOIN_CAPTIONS}" \
+hv_require_file "${QC_ROLL}" \
+  "Stage 1a green-flash QC roll is missing; run resequence_stage1a_review_array.sh first."
+hv_require_file "${QC_ROLL_CAPTIONS}" \
   "Stage 1a review captions are missing; rerun resequence_stage1a_review_array.sh."
 hv_require_file "${STAGE1A_DONE}" \
   "Stage 1a has not completed; run resequence_stage1a_review_array.sh first."
 
-CUTS_FINGERPRINT="$(hv_file_fingerprint "${VERIFIED_CUTS}")"
-if ! grep -Fq "v1|cuts=${CUTS_FINGERPRINT}" "${STAGE1A_DONE}"; then
-  echo "Stage 1a was built from different verified cuts; rerun resequence_stage1a_review_array.sh." >&2
+CUTS_FINGERPRINT="$(hv_file_fingerprint "${CUTS}")"
+if ! grep -Fq "v1|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}" "${STAGE1A_DONE}"; then
+  echo "Stage 1a was built from different cut-review inputs; rerun resequence_stage1a_review_array.sh." >&2
   exit 4
 fi
 

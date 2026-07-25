@@ -16,8 +16,8 @@ sbatch src/pipeline/slurm/resequence/download_raw_array.sh       # fetch raw vid
 sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh    # time the bounded full path
 sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and cut proposal
 
-# inspect qc/candidates.csv and qc/cut_review.proposed.csv, then save:
-#   qc/cut_review.verified.csv
+# inspect qc/candidates.csv and qc/cut_review.proposed.csv
+# (save qc/cut_review.verified.csv only when you edit a cut)
 
 sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh # order + green review
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # final render, then upload
@@ -28,11 +28,11 @@ sbatch src/pipeline/slurm/resequence/compress_resequenced_array.sh
 ```
 
 Stage 1 covers steps 1 and 2 below and prepares an editable cut table without
-writing hundreds of JPEGs. Stage 1a will not start until
-`cut_review.verified.csv` exists; it then covers steps 3 and 4 with the
-established trajectory-10 ordering and writes the green-flash review. Stage 2
-only performs the final render and upload after those outputs exist. Completed
-steps and validated video parts resume safely after a wall-clock kill.
+writing hundreds of JPEGs. Stage 1a uses the inspected proposal directly, or
+`cut_review.verified.csv` when cuts were edited; it then covers steps 3 and 4
+with the established trajectory-10 ordering and writes the green-flash QC roll.
+Stage 2 only performs the final render and upload after those outputs exist.
+Completed steps and validated video parts resume safely after a wall-clock kill.
 
 Compression is intentionally separate from resequencing: it creates a smaller
 H.264 sharing derivative while retaining the full-fidelity resequenced MP4.

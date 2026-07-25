@@ -1,11 +1,12 @@
 #!/bin/bash
-# Resequencing stage 1a: turn verified cuts into an ordered green-flash review.
+# Resequencing stage 1a: turn inspected cuts into an ordered green-flash QC roll.
 #
 #   sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh
 #
-# Run this only after stage 1's qc/cut_review.verified.csv exists. It builds
-# source segments, applies the established trajectory/10-frame greedy order,
-# and makes a compact MP4 that shows every proposed join with a green flash.
+# Run this after inspecting stage 1's proposed cut table. It uses that proposed
+# table directly when no edits are needed, or qc/cut_review.verified.csv when
+# edits were saved. It builds source segments, applies the established
+# trajectory/10-frame greedy order, and makes a compact green-flash QC roll.
 # It does not render the full archival video or upload anything. Stage 2 uses
 # these validated outputs for that expensive final step.
 
@@ -38,24 +39,31 @@ hv_require_ffmpeg
 LOCATOR="$(hv_locator_for_task "${LOCATORS}" "${SLURM_ARRAY_TASK_ID:-0}")"
 hv_resolve "${LOCATOR}"
 
+PROPOSED_CUTS="${HV_QC_DIR}/cut_review.proposed.csv"
 VERIFIED_CUTS="${HV_QC_DIR}/cut_review.verified.csv"
 SEGMENTS="${HV_SEG_DIR}/segments.csv"
 RANKED_EDGES="${HV_ORDER_DIR}/ranked_edges.csv"
 GREEDY_ORDER="${HV_ORDER_DIR}/greedy_order.csv"
-JOIN_REVIEW="${HV_REVIEW_DIR}/join_review_greedy_order.mp4"
-JOIN_CAPTIONS="${HV_REVIEW_DIR}/join_review_greedy_order.captions.csv"
+QC_ROLL="${HV_REVIEW_DIR}/qc_roll_greedy_order.mp4"
+QC_ROLL_CAPTIONS="${HV_REVIEW_DIR}/qc_roll_greedy_order.captions.csv"
 SEGMENTS_DONE="${HV_SEG_DIR}/.build_segments.complete"
 ORDER_DONE="${HV_ORDER_DIR}/.order_segments.complete"
 REVIEW_DONE="${HV_REVIEW_DIR}/.join_review.complete"
 STAGE1A_DONE="${HV_REVIEW_DIR}/.stage1a.complete"
 
 hv_require_file "${RESEQ_PATH}" "The raw video is gone; re-run download_raw_array.sh."
-hv_require_file "${VERIFIED_CUTS}" \
-  "Review ${HV_QC_DIR}/cut_review.proposed.csv and save the result as cut_review.verified.csv."
+hv_require_file "${PROPOSED_CUTS}" "Stage 1 cut proposal is missing; rerun resequence_stage1_array.sh."
+if [ -f "${VERIFIED_CUTS}" ]; then
+  CUTS="${VERIFIED_CUTS}"
+  echo "Using edited cut review: ${CUTS}"
+else
+  CUTS="${PROPOSED_CUTS}"
+  echo "Using manually inspected cut proposal without edits: ${CUTS}"
+fi
 
 mkdir -p "${HV_SEG_DIR}" "${HV_ORDER_DIR}" "${HV_REVIEW_DIR}"
 
-CUTS_FINGERPRINT="$(hv_file_fingerprint "${VERIFIED_CUTS}")"
+CUTS_FINGERPRINT="$(hv_file_fingerprint "${CUTS}")"
 SEGMENTS_SIGNATURE="v3|cuts=${CUTS_FINGERPRINT}|tool=$(hv_file_fingerprint \
   src/resequence/build_segments_from_jumps.py)|frame_count=${FRAME_COUNT:-auto}"
 SEGMENTS_SIGNATURE="${SEGMENTS_SIGNATURE}|count_frames=${COUNT_FRAMES:-0}"
@@ -65,7 +73,7 @@ if hv_step_needed "${SEGMENTS_DONE}" "${SEGMENTS_SIGNATURE}" "${SEGMENTS}"; then
   BUILD_SEGMENTS=(
     uv run --no-sync python src/resequence/build_segments_from_jumps.py
     "${RESEQ_PATH}"
-    --jumps "${VERIFIED_CUTS}"
+    --jumps "${CUTS}"
     --input-kind cut-review
     --out "${SEGMENTS}"
   )
@@ -111,7 +119,7 @@ REVIEW_SIGNATURE="${REVIEW_SIGNATURE}|order=${ORDER_FINGERPRINT}|tool=$(hv_file_
 REVIEW_SIGNATURE="${REVIEW_SIGNATURE}|limit=${JOIN_REVIEW_LIMIT:-all}"
 REVIEW_SIGNATURE="${REVIEW_SIGNATURE}|seconds=${JOIN_REVIEW_SECONDS:-default}"
 
-if hv_step_needed "${REVIEW_DONE}" "${REVIEW_SIGNATURE}" "${JOIN_REVIEW}" "${JOIN_CAPTIONS}"; then
+if hv_step_needed "${REVIEW_DONE}" "${REVIEW_SIGNATURE}" "${QC_ROLL}" "${QC_ROLL_CAPTIONS}"; then
   rm -f "${REVIEW_DONE}" "${STAGE1A_DONE}"
   REVIEW=(
     uv run --no-sync python src/resequence/diagnostics/make_join_review_video.py
@@ -119,19 +127,20 @@ if hv_step_needed "${REVIEW_DONE}" "${REVIEW_SIGNATURE}" "${JOIN_REVIEW}" "${JOI
     --ranked-edges "${RANKED_EDGES}"
     --segments "${SEGMENTS}"
     --order-csv "${GREEDY_ORDER}"
-    --out "${JOIN_REVIEW}"
+    --out "${QC_ROLL}"
   )
   if [ -n "${JOIN_REVIEW_LIMIT:-}" ]; then REVIEW+=(--limit "${JOIN_REVIEW_LIMIT}"); fi
   if [ -n "${JOIN_REVIEW_SECONDS:-}" ]; then
     REVIEW+=(--seconds-each-side "${JOIN_REVIEW_SECONDS}")
   fi
   hv_time_step "join_review_video" "${REVIEW[@]}"
-  hv_require_file "${JOIN_REVIEW}" "Join-review rendering completed without an output video."
-  hv_require_file "${JOIN_CAPTIONS}" "Join-review rendering completed without captions."
+  hv_require_file "${QC_ROLL}" "QC-roll rendering completed without an output video."
+  hv_require_file "${QC_ROLL_CAPTIONS}" "QC-roll rendering completed without captions."
   hv_mark_complete "${REVIEW_DONE}" "${REVIEW_SIGNATURE}"
 fi
 
-STAGE1A_SIGNATURE="v1|cuts=${CUTS_FINGERPRINT}|segments=${SEGMENTS_SIGNATURE}"
+STAGE1A_SIGNATURE="v1|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}"
+STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|segments=${SEGMENTS_SIGNATURE}"
 STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|order=${ORDER_SIGNATURE}|review=${REVIEW_SIGNATURE}"
 hv_mark_complete "${STAGE1A_DONE}" "${STAGE1A_SIGNATURE}"
 
@@ -141,8 +150,8 @@ Stage 1a complete for ${RESEQ_KEY}.
 
   segments          : ${SEGMENTS}
   greedy order      : ${GREEDY_ORDER}
-  green-flash review: ${JOIN_REVIEW}
-  captions          : ${JOIN_CAPTIONS}
+  green-flash QC roll: ${QC_ROLL}
+  captions           : ${QC_ROLL_CAPTIONS}
 
 Inspect the green-flash review before committing the long reassembly run.
 The ordering itself remains the established automatic trajectory/10-frame

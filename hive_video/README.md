@@ -128,9 +128,10 @@ table as:
 <work dir>/qc/cut_review.verified.csv
 ```
 
-If all proposed cuts are correct, copy the proposed table unchanged. Stage 1a
-refuses to start without the verified file. To extract still frames for a
-specific investigation, run `detect_video_discontinuities.py` directly with
+If all proposed cuts are correct, do nothing further: Stage 1a uses that
+inspected proposal directly. Only save `cut_review.verified.csv` when you
+actually change a cut. To extract still frames for a specific investigation,
+run `detect_video_discontinuities.py` directly with
 `--write-candidate-frames`; it is not part of the normal array output.
 
 #### 5. Stage 1a, make and inspect the green-flash order review
@@ -139,10 +140,11 @@ specific investigation, run `detect_video_discontinuities.py` directly with
 sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh
 ```
 
-Builds segments from the verified cuts, applies the established trajectory
-signature with 10-frame windows, and creates a green-flash review containing
-every join in that exact greedy order. It stops before full reassembly and does
-not upload anything, so the compact review MP4 can be inspected first.
+Builds segments from the inspected proposal (or an edited verified table),
+applies the established trajectory signature with 10-frame windows, and creates
+`review/qc_roll_greedy_order.mp4`: a green-flash QC roll containing every join
+in that exact greedy order. It stops before full reassembly and does not upload
+anything, so the compact review MP4 can be inspected first.
 
 #### 6. Stage 2, reassemble and back up
 

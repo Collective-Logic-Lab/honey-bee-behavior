@@ -8,9 +8,9 @@
 #   2. summarize_jump_events          -> qc/jump_events.csv
 #   3. prepare_cut_review             -> qc/cut_review.proposed.csv
 #
-# It stops there on purpose. Inspect the event summary and proposed cut table,
-# edit keep/prev_frame_idx, and save the result as
-# qc/cut_review.verified.csv. Stage 2 refuses to run without that file.
+# It stops there on purpose. Inspect the event summary and proposed cut table.
+# If edits are needed, save them as qc/cut_review.verified.csv; otherwise
+# Stage 1a consumes the inspected proposal directly.
 #
 # Candidate JPEG extraction is deliberately opt-in in the underlying tool: the
 # 2019 runs can produce hundreds of files that are less usable than the compact
@@ -143,11 +143,11 @@ Stage 1 complete for ${RESEQ_KEY}.
   event summary : ${EVENTS}
   proposed cuts : ${CUT_PROPOSAL}
 
-Next: inspect the event summary and proposed cuts. Edit keep and
-prev_frame_idx as needed, then save the reviewed table as
+Next: inspect the event summary and proposed cuts. If you change keep or
+prev_frame_idx, save the edited table as
 
   ${HV_QC_DIR}/cut_review.verified.csv
 
-Stage 2 refuses to run without that file, so the manual check cannot be
-skipped by accident.
+If no edits are needed, leave the proposal as-is and run Stage 1a; it records
+that exact proposed CSV as its cut input.
 EOF
