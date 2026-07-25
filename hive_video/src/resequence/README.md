@@ -20,12 +20,21 @@ sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and
 #   qc/cut_review.verified.csv
 
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # steps 3-5, then upload
+
+# After choosing a profile from the three short H.264 samples:
+sbatch src/pipeline/slurm/resequence/compress_resequenced_smoke_test.sh
+sbatch src/pipeline/slurm/resequence/compress_resequenced_array.sh
 ```
 
 Stage 1 covers steps 1 and 2 below and prepares an editable cut table. Stage 2
 will not start until `cut_review.verified.csv` exists; it then covers steps 3
 through 5 with the established trajectory-10 ordering. Completed steps and
 validated video parts resume safely after a wall-clock kill.
+
+Compression is intentionally separate from resequencing: it creates a smaller
+H.264 sharing derivative while retaining the full-fidelity resequenced MP4.
+The smoke wrapper renders `high`, `medium`, and `low` samples before the array
+creates and uploads only the chosen full-length profile.
 
 `src/pipeline/slurm/resequence/common.sh` holds the shared environment, the uv
 scratch-venv locking, and `hv_resolve`, which turns a locator such as
@@ -61,6 +70,11 @@ The current pipeline is:
    Render the ordered segments into a captioned MP4. This step is restartable:
    it writes part videos, skips completed parts, and checks `.safeword` between
    parts.
+
+6. `compress_resequenced.py`
+   Make a separately named H.264 sharing copy at one of three recorded CRF
+   profiles. It validates resolution, frame rate, duration, and codec before
+   atomically publishing the local derivative.
 
 ### Diagnostics
 

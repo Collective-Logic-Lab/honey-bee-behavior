@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from src.resequence import build_segments_from_jumps
+from src.resequence import compress_resequenced
 from src.resequence import prepare_cut_review
 from src.resequence import reassemble_video_from_segments
 from src.resequence.diagnostics import make_join_review_video
@@ -78,6 +79,83 @@ class CutReviewTests(unittest.TestCase):
                 max_duration_frames=None,
             )
             self.assertEqual(cuts, [1800, 3600, 5400])
+
+
+class CompressionTests(unittest.TestCase):
+    def make_source(self, path: Path) -> None:
+        writer = cv2.VideoWriter(
+            str(path),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            25.0,
+            (32, 32),
+        )
+        self.assertTrue(writer.isOpened())
+        for value in range(25):
+            writer.write(np.full((32, 32, 3), value * 8, dtype=np.uint8))
+        writer.release()
+
+    def test_compression_writes_h264_and_validated_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "archival.mp4"
+            output = root / "share.medium.mp4"
+            metadata = root / "share.medium.compression.json"
+            self.make_source(source)
+            result = compress_resequenced.compress(
+                source,
+                output,
+                quality="medium",
+                preset="medium",
+                start_seconds=0.0,
+                duration_seconds=0.4,
+                threads=1,
+                heartbeat_seconds=60,
+                metadata_path=metadata,
+                overwrite=False,
+            )
+            self.assertFalse(result["skipped"])
+            output_probe = compress_resequenced.probe_video(output)
+            self.assertEqual(output_probe["codec_name"], "h264")
+            self.assertEqual((output_probe["width"], output_probe["height"]), (32, 32))
+            report = json.loads(metadata.read_text())
+            self.assertEqual(report["settings"]["quality"], "medium")
+            self.assertEqual(report["settings"]["crf"], 23)
+            self.assertEqual(report["settings"]["threads"], 1)
+
+            skipped = compress_resequenced.compress(
+                source,
+                output,
+                quality="medium",
+                preset="medium",
+                start_seconds=0.0,
+                duration_seconds=0.4,
+                threads=1,
+                heartbeat_seconds=60,
+                metadata_path=metadata,
+                overwrite=False,
+            )
+            self.assertTrue(skipped["skipped"])
+
+    def test_compression_refuses_an_unexpected_existing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "archival.mp4"
+            output = root / "unexpected.mp4"
+            self.make_source(source)
+            output.write_bytes(b"not an MP4")
+            with self.assertRaises(FileExistsError):
+                compress_resequenced.compress(
+                    source,
+                    output,
+                    quality="low",
+                    preset="medium",
+                    start_seconds=0.0,
+                    duration_seconds=0.4,
+                    threads=1,
+                    heartbeat_seconds=60,
+                    metadata_path=root / "unexpected.compression.json",
+                    overwrite=False,
+                )
 
 
 class ExactOrderReviewTests(unittest.TestCase):

@@ -145,6 +145,29 @@ backup runs on its own wall clock so it is not competing with the reassembly.
 Uploading needs write access to the bucket: run `hf auth login` on the cluster
 once, or set `HF_TOKEN` in the job environment.
 
+#### 6. Make a smaller sharing copy (after stage 2)
+
+The archival resequenced MP4 remains unchanged. First render and inspect the
+same short clip at all three H.264 quality profiles:
+
+```bash
+sbatch src/pipeline/slurm/resequence/compress_resequenced_smoke_test.sh
+```
+
+The smoke job writes `high` (CRF 18), `medium` (23), and `low` (28) samples
+under `<work dir>/compression_smoke/`; it does not upload them. After choosing
+one, create that one full-length sharing derivative. `medium` is the default:
+
+```bash
+sbatch --export=ALL,QUALITY=medium \
+    src/pipeline/slurm/resequence/compress_resequenced_array.sh
+```
+
+Each successful array task queues its own verified upload to
+`hf://buckets/collective-logic-lab/honey-bee/resequenced/compressed/reseq_<key>/<quality>/`.
+Only the chosen sharing copy is added there; the full-fidelity resequenced
+video remains at its existing archival path.
+
 #### Where things land
 
 Work for one video lives under
@@ -159,6 +182,8 @@ Work for one video lives under
 | `review/` | every join in the exact rendered order |
 | `output/` | the reassembled MP4 and its frame map |
 | `upload/` | exactly what gets published to HuggingFace |
+| `compression_smoke/` | high, medium, and low short comparison clips |
+| `compressed/` | one selected full-length H.264 sharing derivative |
 
 Shared setup lives in `src/pipeline/slurm/resequence/common.sh`; override
 `HIVE_VIDEO_ROOT`, `SCRATCH_ROOT`, or `DOWNLOAD_DIR` there or in the
