@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
         "--out",
         type=Path,
         required=True,
-        help="Output directory for CSVs and candidate before/after frames.",
+        help="Output directory for CSVs and optional candidate before/after frames.",
     )
     parser.add_argument(
         "--sample-width",
@@ -96,6 +96,15 @@ def parse_args() -> argparse.Namespace:
         "--keep-all-distances",
         action="store_true",
         help="Write every consecutive-frame distance, not just top candidates.",
+    )
+    parser.add_argument(
+        "--write-candidate-frames",
+        action="store_true",
+        help=(
+            "Extract before/after JPEGs for every candidate. Disabled by default: "
+            "the compact CSV and the Stage 1a green-flash review are the normal "
+            "manual-review artifacts."
+        ),
     )
     parser.add_argument(
         "--progress-every-frames",
@@ -464,7 +473,8 @@ def main() -> None:
         path = "expected_boundary_neighborhood_distances.csv" if include_expected else "frame_distances.csv"
         write_distances(out_dir / path, distances, include_expected=include_expected)
     write_distances(out_dir / "candidates.csv", candidates, include_expected=include_expected)
-    extract_boundary_frames(video, out_dir / "candidates", candidates)
+    if args.write_candidate_frames:
+        extract_boundary_frames(video, out_dir / "candidates", candidates)
 
     print(f"video: {video}")
     print(f"fps: {info.fps:.6f}; comparison frames: {width}x{height}")
@@ -474,6 +484,8 @@ def main() -> None:
         f"mad_threshold={mad_threshold:.6f}; effective_threshold={threshold:.6f}"
     )
     print(f"saved {len(candidates)} candidates to {out_dir / 'candidates.csv'}")
+    if args.write_candidate_frames:
+        print(f"saved candidate frames to {out_dir / 'candidates'}")
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ SMOKE_QUALITIES=${SMOKE_QUALITIES:-"high medium low"}
 COMPRESS_PRESET=${COMPRESS_PRESET:-medium}
 
 hv_sync_env
+hv_require_ffmpeg
 hv_resolve "${SMOKE_LOCATOR}"
 
 FINAL_VIDEO="${HV_OUT_DIR}/reseq_${RESEQ_KEY}.mp4"

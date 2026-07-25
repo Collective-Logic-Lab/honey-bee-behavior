@@ -104,7 +104,7 @@ Runs the full path over 20,000 frames and reports separate detection, ordering,
 review-video, and reassembly timings. The wall clocks in the stage scripts are
 placeholders until this has run.
 
-#### 3. Stage 1, up to the cut review
+#### 3. Stage 1, detect cuts and prepare the cut table
 
 ```bash
 sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh
@@ -114,38 +114,50 @@ Runs detection and event summarisation, then writes
 `qc/cut_review.proposed.csv`. Single-jump events default to `keep=1`, matching
 the established Start03/Start04 procedure; multi-jump events remain visible
 with `keep=0`. Successful steps receive completion markers, so a task killed
-while writing output reruns that step.
+while writing output reruns that step. It intentionally writes CSV artifacts,
+not hundreds of before/after JPEGs.
 
 #### 4. Check the cuts by hand
 
-Inspect `qc/candidates/`, `qc/jump_events.csv`, and
-`qc/cut_review.proposed.csv`. Boundary detection is never clean: change
-`keep`, correct `prev_frame_idx`, and add diagnosed cuts when needed. Save the
-reviewed table as:
+Inspect `qc/candidates.csv`, `qc/jump_events.csv`, and
+`qc/cut_review.proposed.csv`. Boundary detection is never clean: change `keep`,
+correct `prev_frame_idx`, and add diagnosed cuts when needed. Save the reviewed
+table as:
 
 ```text
 <work dir>/qc/cut_review.verified.csv
 ```
 
-If all proposed cuts are correct, copy the proposed table unchanged. Stage 2
-refuses to start without the verified file.
+If all proposed cuts are correct, copy the proposed table unchanged. Stage 1a
+refuses to start without the verified file. To extract still frames for a
+specific investigation, run `detect_video_discontinuities.py` directly with
+`--write-candidate-frames`; it is not part of the normal array output.
 
-#### 5. Stage 2, reassemble and back up
+#### 5. Stage 1a, make and inspect the green-flash order review
+
+```bash
+sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh
+```
+
+Builds segments from the verified cuts, applies the established trajectory
+signature with 10-frame windows, and creates a green-flash review containing
+every join in that exact greedy order. It stops before full reassembly and does
+not upload anything, so the compact review MP4 can be inspected first.
+
+#### 6. Stage 2, reassemble and back up
 
 ```bash
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
 
-Builds segments from the verified cuts, applies the established trajectory
-signature with 10-frame windows, creates a green-flash review containing every
-join in that exact greedy order, and renders it. A dependent job publishes the
-validated MP4 and its audit artifacts to
+Consumes the checked Stage 1a segments and order, then renders the archival
+MP4. A dependent job publishes the validated MP4 and its audit artifacts to
 `hf://buckets/collective-logic-lab/honey-bee/resequenced/reseq_<key>`. The
 backup runs on its own wall clock so it is not competing with the reassembly.
 Uploading needs write access to the bucket: run `hf auth login` on the cluster
 once, or set `HF_TOKEN` in the job environment.
 
-#### 6. Make a smaller sharing copy (after stage 2)
+#### 7. Make a smaller sharing copy (after stage 2)
 
 The archival resequenced MP4 remains unchanged. First render and inspect the
 same short clip at all three H.264 quality profiles:
@@ -176,7 +188,7 @@ Work for one video lives under
 
 | Path | Contents |
 | --- | --- |
-| `qc/` | discontinuity candidates and jump events |
+| `qc/` | compact discontinuity candidates, jump events, and cut-review CSVs |
 | `segments/` | segment definitions |
 | `order/` | ranked joins and the trajectory-10 greedy order |
 | `review/` | every join in the exact rendered order |

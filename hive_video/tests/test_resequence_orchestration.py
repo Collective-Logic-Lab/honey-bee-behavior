@@ -7,12 +7,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import cv2
 import numpy as np
 
 from src.resequence import build_segments_from_jumps
 from src.resequence import compress_resequenced
+from src.resequence import detect_video_discontinuities
 from src.resequence import prepare_cut_review
 from src.resequence import reassemble_video_from_segments
 from src.resequence.diagnostics import make_join_review_video
@@ -25,6 +27,31 @@ def write_csv(path: Path, fieldnames: list[str], rows: list[dict]) -> None:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+class DetectionArtifactTests(unittest.TestCase):
+    def test_candidate_jpegs_are_explicitly_opt_in(self) -> None:
+        with mock.patch.object(
+            sys,
+            "argv",
+            ["detect_video_discontinuities.py", "input.mp4", "--out", "qc"],
+        ):
+            default_args = detect_video_discontinuities.parse_args()
+        self.assertFalse(default_args.write_candidate_frames)
+
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "detect_video_discontinuities.py",
+                "input.mp4",
+                "--out",
+                "qc",
+                "--write-candidate-frames",
+            ],
+        ):
+            explicit_args = detect_video_discontinuities.parse_args()
+        self.assertTrue(explicit_args.write_candidate_frames)
 
 
 class CutReviewTests(unittest.TestCase):
@@ -159,6 +186,84 @@ class CompressionTests(unittest.TestCase):
 
 
 class ExactOrderReviewTests(unittest.TestCase):
+    def test_small_green_flash_render_writes_video_and_captions(self) -> None:
+        source = Path(__file__).parents[1] / "data/raw/start04_sample_5s.mp4"
+        self.assertTrue(source.is_file())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            segments = root / "segments.csv"
+            order = root / "order.csv"
+            ranked = root / "ranked.csv"
+            out = root / "review.mp4"
+            write_csv(
+                segments,
+                ["segment_id", "start_frame_idx", "end_frame_idx"],
+                [
+                    {"segment_id": 0, "start_frame_idx": 0, "end_frame_idx": 39},
+                    {"segment_id": 1, "start_frame_idx": 40, "end_frame_idx": 79},
+                    {"segment_id": 2, "start_frame_idx": 80, "end_frame_idx": 119},
+                ],
+            )
+            write_csv(
+                order,
+                ["order", "segment_id"],
+                [
+                    {"order": 0, "segment_id": 0},
+                    {"order": 1, "segment_id": 1},
+                    {"order": 2, "segment_id": 2},
+                ],
+            )
+            write_csv(
+                ranked,
+                [
+                    "rank_for_from_segment",
+                    "from_segment_id",
+                    "to_segment_id",
+                    "mean_abs_diff",
+                ],
+                [
+                    {
+                        "rank_for_from_segment": 1,
+                        "from_segment_id": 0,
+                        "to_segment_id": 1,
+                        "mean_abs_diff": 1.0,
+                    },
+                    {
+                        "rank_for_from_segment": 1,
+                        "from_segment_id": 1,
+                        "to_segment_id": 2,
+                        "mean_abs_diff": 1.0,
+                    },
+                ],
+            )
+            command = [
+                sys.executable,
+                str(
+                    Path(__file__).parents[1]
+                    / "src/resequence/diagnostics/make_join_review_video.py"
+                ),
+                str(source),
+                "--ranked-edges",
+                str(ranked),
+                "--segments",
+                str(segments),
+                "--order-csv",
+                str(order),
+                "--out",
+                str(out),
+                "--seconds-each-side",
+                "0.08",
+                "--scale-width",
+                "64",
+            ]
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            self.assertTrue(out.is_file())
+            self.assertGreater(out.stat().st_size, 0)
+            captions = out.with_suffix(".captions.csv")
+            self.assertTrue(captions.is_file())
+            with captions.open(newline="") as handle:
+                self.assertEqual(len(list(csv.DictReader(handle))), 6)
+
     def test_review_uses_every_actual_order_join_including_rank_two(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

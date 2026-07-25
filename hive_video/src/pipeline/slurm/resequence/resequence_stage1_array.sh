@@ -8,9 +8,14 @@
 #   2. summarize_jump_events          -> qc/jump_events.csv
 #   3. prepare_cut_review             -> qc/cut_review.proposed.csv
 #
-# It stops there on purpose. Inspect the candidate before/after frames and the
-# proposed cut table, edit keep/prev_frame_idx, and save the result as
+# It stops there on purpose. Inspect the event summary and proposed cut table,
+# edit keep/prev_frame_idx, and save the result as
 # qc/cut_review.verified.csv. Stage 2 refuses to run without that file.
+#
+# Candidate JPEG extraction is deliberately opt-in in the underlying tool: the
+# 2019 runs can produce hundreds of files that are less usable than the compact
+# Stage 1a green-flash ordering review. Run the detector by hand with
+# --write-candidate-frames only when a particular boundary needs a still image.
 #
 # A step is skipped only after its command writes a completion marker, so a
 # task killed while writing output reruns that step. Set FORCE=1 to redo all.
@@ -46,6 +51,7 @@ source "${SCRIPT_DIR}/common.sh"
 LOCATORS=${LOCATORS:-"start4_side1_top start47_side0_top start47_side1_top"}
 
 hv_sync_env
+hv_require_ffmpeg
 
 LOCATOR="$(hv_locator_for_task "${LOCATORS}" "${SLURM_ARRAY_TASK_ID:-0}")"
 hv_resolve "${LOCATOR}"
@@ -134,11 +140,10 @@ cat <<EOF
 
 Stage 1 complete for ${RESEQ_KEY}.
 
-  candidate frames : ${HV_QC_DIR}/candidates/
-  event summary    : ${EVENTS}
-  proposed cuts    : ${CUT_PROPOSAL}
+  event summary : ${EVENTS}
+  proposed cuts : ${CUT_PROPOSAL}
 
-Next: inspect the candidate frames and proposed cuts. Edit keep and
+Next: inspect the event summary and proposed cuts. Edit keep and
 prev_frame_idx as needed, then save the reviewed table as
 
   ${HV_QC_DIR}/cut_review.verified.csv

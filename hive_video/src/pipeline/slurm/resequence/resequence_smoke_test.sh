@@ -38,6 +38,7 @@ SMOKE_FRAMES=${SMOKE_FRAMES:-20000}
 SMOKE_LOCATOR=${SMOKE_LOCATOR:-start4_side1_top}
 
 hv_sync_env
+hv_require_ffmpeg
 hv_resolve "${SMOKE_LOCATOR}"
 
 hv_require_file "${RESEQ_PATH}" \

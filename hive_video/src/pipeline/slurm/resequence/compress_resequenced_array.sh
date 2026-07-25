@@ -38,6 +38,7 @@ case "${QUALITY}" in
 esac
 
 hv_sync_env
+hv_require_ffmpeg
 LOCATOR="$(hv_locator_for_task "${LOCATORS}" "${SLURM_ARRAY_TASK_ID:-0}")"
 hv_resolve "${LOCATOR}"
 

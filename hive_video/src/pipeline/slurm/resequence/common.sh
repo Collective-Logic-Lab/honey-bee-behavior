@@ -71,6 +71,27 @@ hv_sync_env() {
   trap - EXIT
 }
 
+# FFmpeg is a Sol module rather than a Python dependency. Load the confirmed
+# cluster build when a compute-node environment does not already provide it.
+# This keeps rendering jobs independent of the login shell that submitted them.
+hv_require_ffmpeg() {
+  if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! type module >/dev/null 2>&1 && [ -r /etc/profile.d/modules.sh ]; then
+    # shellcheck source=/etc/profile.d/modules.sh
+    source /etc/profile.d/modules.sh
+  fi
+  if type module >/dev/null 2>&1; then
+    echo "Loading ffmpeg-6.0-gcc-12.1.0 module"
+    module load ffmpeg-6.0-gcc-12.1.0
+  fi
+  if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+    echo "ffmpeg and ffprobe are required but unavailable after loading ffmpeg-6.0-gcc-12.1.0." >&2
+    exit 5
+  fi
+}
+
 # Resolve a locator such as start47_side1_top into every path the pipeline needs.
 hv_resolve() {
   local locator="$1"
