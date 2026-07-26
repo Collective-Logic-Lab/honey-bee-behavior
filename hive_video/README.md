@@ -201,6 +201,18 @@ Each successful array task queues its own verified upload to
 Only the chosen sharing copy is added there; the full-fidelity resequenced
 video remains at its existing archival path.
 
+#### 9. One-time maximum-compression backfill for the five existing videos
+
+```bash
+sbatch src/pipeline/slurm/resequence/compress_existing_low_backfill_array.sh
+```
+
+This reviewed five-item array covers the three current Stage 2 outputs plus the
+Start 04 side 0 and Start 03 side 0 archival MP4s in `prior_batch/`. It runs at
+most two 8-CPU transcodes at once and uploads each maximum-compression low
+(CRF 28) derivative to its canonical `compressed/reseq_<key>/low/` folder after
+byte-size verification.
+
 #### Where things land
 
 Work for one video lives under

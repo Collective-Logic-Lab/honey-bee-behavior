@@ -29,6 +29,9 @@ sbatch src/pipeline/slurm/resequence/compress_qc_roll_smoke.sh
 # After choosing a profile, create a sharing copy of each final video:
 sbatch src/pipeline/slurm/resequence/compress_resequenced_smoke_test.sh
 sbatch src/pipeline/slurm/resequence/compress_resequenced_array.sh
+
+# One-time maximum-compression backfill for the three current and two prior videos:
+sbatch src/pipeline/slurm/resequence/compress_existing_low_backfill_array.sh
 ```
 
 Stage 1 covers steps 1 and 2 below and prepares an editable cut table without
