@@ -159,7 +159,26 @@ backup runs on its own wall clock so it is not competing with the reassembly.
 Uploading needs write access to the bucket: run `hf auth login` on the cluster
 once, or set `HF_TOKEN` in the job environment.
 
-#### 7. Make a smaller sharing copy (after stage 2)
+#### 7. Compare sharing profiles on a QC roll
+
+The full Stage 1a QC roll is a compact, realistic source for choosing the
+sharing profile before committing to a full archival-video transcode:
+
+```bash
+sbatch src/pipeline/slurm/resequence/compress_qc_roll_smoke.sh
+```
+
+This job encodes the complete Start 04 side 1 QC roll at high (CRF 18), medium
+(23), and low (28). Its dependent upload job sends only those three comparison
+MP4s, their metadata, and a README to:
+
+```text
+hf://buckets/collective-logic-lab/honey-bee/resequenced/qc_compression_smoke/reseq_<key>/
+```
+
+It does not alter the QC roll or any final resequenced video.
+
+#### 8. Make a smaller sharing copy (after stage 2)
 
 The archival resequenced MP4 remains unchanged. First render and inspect the
 same short clip at all three H.264 quality profiles:
@@ -197,6 +216,7 @@ Work for one video lives under
 | `output/` | the reassembled MP4 and its frame map |
 | `upload/` | exactly what gets published to HuggingFace |
 | `compression_smoke/` | high, medium, and low short comparison clips |
+| `qc_compression_smoke/` | high, medium, and low full-QC-roll comparison files |
 | `compressed/` | one selected full-length H.264 sharing derivative |
 
 Shared setup lives in `src/pipeline/slurm/resequence/common.sh`; override

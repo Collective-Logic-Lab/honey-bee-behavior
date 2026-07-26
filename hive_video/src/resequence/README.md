@@ -22,7 +22,11 @@ sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and
 sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh # order + green review
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # final render, then upload
 
-# After choosing a profile from the three short H.264 samples:
+# Compare high/medium/low on the complete Start 04 side 1 QC roll and upload
+# only those small comparison files for remote inspection:
+sbatch src/pipeline/slurm/resequence/compress_qc_roll_smoke.sh
+
+# After choosing a profile, create a sharing copy of each final video:
 sbatch src/pipeline/slurm/resequence/compress_resequenced_smoke_test.sh
 sbatch src/pipeline/slurm/resequence/compress_resequenced_array.sh
 ```
