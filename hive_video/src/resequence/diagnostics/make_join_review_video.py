@@ -65,6 +65,18 @@ def parse_args() -> argparse.Namespace:
         help="Output width; height is computed by ffmpeg to preserve aspect ratio.",
     )
     parser.add_argument(
+        "--caption-height",
+        type=int,
+        default=40,
+        help="Height in pixels of the top caption strip; use 0 with --caption-mode none.",
+    )
+    parser.add_argument(
+        "--caption-font-size",
+        type=int,
+        default=16,
+        help="Caption font size in pixels.",
+    )
+    parser.add_argument(
         "--caption-mode",
         choices=("auto", "drawtext", "pillow", "none"),
         default="auto",
@@ -186,15 +198,17 @@ def make_clip(
     caption: str,
     scale_width: int,
     caption_mode: str,
+    caption_height: int,
+    caption_font_size: int,
     caption_image: Path | None = None,
 ) -> None:
     if caption_mode == "drawtext":
         safe_caption = ffmpeg_escape_text(caption)
         vf = (
             f"scale={scale_width}:-2,"
-            "pad=iw:ih+64:0:64:color=black,"
-            f"drawtext=text='{safe_caption}':x=16:y=18:"
-            "fontcolor=white:fontsize=24:box=1:boxcolor=black@0.6:boxborderw=8"
+            f"pad=iw:ih+{caption_height}:0:{caption_height}:color=black,"
+            f"drawtext=text='{safe_caption}':x=12:y=10:"
+            f"fontcolor=white:fontsize={caption_font_size}"
         )
         inputs = ["-i", str(video)]
         output_options = ["-vf", vf]
@@ -203,7 +217,8 @@ def make_clip(
             raise ValueError("caption_image is required for pillow caption mode")
         inputs = ["-i", str(video), "-i", str(caption_image)]
         filter_complex = (
-            f"[0:v]scale={scale_width}:-2[base];"
+            f"[0:v]scale={scale_width}:-2,"
+            f"pad=iw:ih+{caption_height}:0:{caption_height}:color=black[base];"
             "[base][1:v]overlay=0:0:format=auto"
         )
         output_options = ["-filter_complex", filter_complex]
@@ -232,15 +247,21 @@ def make_clip(
     subprocess.run(cmd, check=True)
 
 
-def make_caption_image(path: Path, caption: str, width: int, height: int = 72) -> None:
+def make_caption_image(
+    path: Path,
+    caption: str,
+    width: int,
+    height: int,
+    font_size: int,
+) -> None:
     image = Image.new("RGBA", (width, height), (0, 0, 0, 210))
     draw = ImageDraw.Draw(image)
     try:
-        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 24)
+        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", font_size)
     except OSError:
         font = ImageFont.load_default()
 
-    max_width = width - 32
+    max_width = width - 24
     words = caption.split()
     lines: list[str] = []
     current = ""
@@ -256,18 +277,35 @@ def make_caption_image(path: Path, caption: str, width: int, height: int = 72) -
         lines.append(current)
     lines = lines[:2]
 
-    y = 10
+    y = 8
     for line in lines:
-        draw.text((16, y), line, fill=(255, 255, 255, 255), font=font)
-        y += 28
+        draw.text((12, y), line, fill=(255, 255, 255, 255), font=font)
+        y += font_size + 4
     image.save(path)
 
 
-def make_separator_clip(out_path: Path, duration_s: float, scale_width: int, color: str) -> None:
-    # The source video aspect at 824px wide is 752px high; keep that fixed for concat compatibility.
-    height = round(scale_width * 1504 / 1648)
-    if height % 2:
-        height += 1
+def probe_scaled_height(video: Path, scale_width: int) -> int:
+    raw = subprocess.check_output(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0",
+            str(video),
+        ],
+        text=True,
+    ).strip()
+    source_width, source_height = (int(value) for value in raw.split(","))
+    height = round(scale_width * source_height / source_width)
+    return height if height % 2 == 0 else height + 1
+
+
+def make_separator_clip(out_path: Path, duration_s: float, width: int, height: int, color: str) -> None:
     cmd = [
         "ffmpeg",
         "-y",
@@ -276,7 +314,7 @@ def make_separator_clip(out_path: Path, duration_s: float, scale_width: int, col
         "-f",
         "lavfi",
         "-i",
-        f"color=c={color}:s={scale_width}x{height}:r=25:d={duration_s}",
+        f"color=c={color}:s={width}x{height}:r=25:d={duration_s}",
         "-an",
         "-c:v",
         "libx264",
@@ -348,6 +386,10 @@ def main() -> None:
         review_mode = f"candidate rank {args.rank}"
     if not edges:
         raise RuntimeError(f"No joins found for {review_mode}.")
+    if args.caption_height < 0:
+        raise ValueError("--caption-height must be non-negative")
+    if args.caption_font_size <= 0:
+        raise ValueError("--caption-font-size must be positive")
 
     if args.caption_mode == "auto":
         caption_mode = "drawtext" if ffmpeg_has_filter("drawtext") else "pillow"
@@ -357,6 +399,9 @@ def main() -> None:
         print("using Pillow-generated caption bars with ffmpeg overlay", flush=True)
     elif caption_mode == "none":
         print("caption overlay disabled; writing sidecar captions only", flush=True)
+
+    caption_height = args.caption_height if caption_mode != "none" else 0
+    review_height = probe_scaled_height(video, args.scale_width) + caption_height
 
     caption_rows = []
     with tempfile.TemporaryDirectory(prefix="join_review_") as tmpdir:
@@ -371,18 +416,11 @@ def main() -> None:
             difference = edge.get("mean_abs_diff")
             difference_text = f"{difference:.3f}" if difference is not None else "not-retained"
             shared = (
-                f"join {join_index:03d} rank {rank_text} "
-                f"S{edge['from_segment_id']} -> S{edge['to_segment_id']} "
-                f"diff {difference_text}"
+                f"join {join_index:03d} | rank {rank_text} | "
+                f"S{edge['from_segment_id']} -> S{edge['to_segment_id']} | score {difference_text}"
             )
-            before_caption = (
-                f"{shared} | before end frame {edge['from_end_frame_idx']} "
-                f"t={edge['from_end_frame_idx'] / args.fps:.2f}s"
-            )
-            after_caption = (
-                f"{shared} | after start frame {edge['to_start_frame_idx']} "
-                f"t={edge['to_start_frame_idx'] / args.fps:.2f}s"
-            )
+            before_caption = f"{shared} | before f{edge['from_end_frame_idx']}"
+            after_caption = f"{shared} | after f{edge['to_start_frame_idx']}"
             before_clip = tmp / f"join_{join_index:03d}_before.mp4"
             separator_clip = tmp / f"join_{join_index:03d}_separator.mp4"
             after_clip = tmp / f"join_{join_index:03d}_after.mp4"
@@ -390,7 +428,13 @@ def main() -> None:
             after_caption_image = tmp / f"join_{join_index:03d}_after_caption.png"
             print(f"rendering join {join_index}: {shared}", flush=True)
             if caption_mode == "pillow":
-                make_caption_image(before_caption_image, before_caption, args.scale_width)
+                make_caption_image(
+                    before_caption_image,
+                    before_caption,
+                    args.scale_width,
+                    caption_height,
+                    args.caption_font_size,
+                )
             make_clip(
                 video,
                 before_clip,
@@ -399,6 +443,8 @@ def main() -> None:
                 before_caption,
                 args.scale_width,
                 caption_mode,
+                caption_height,
+                args.caption_font_size,
                 before_caption_image if caption_mode == "pillow" else None,
             )
             caption_rows.append(
@@ -416,6 +462,7 @@ def main() -> None:
                 separator_clip,
                 args.separator_seconds,
                 args.scale_width,
+                review_height,
                 args.separator_color,
             )
             caption_rows.append(
@@ -430,7 +477,13 @@ def main() -> None:
             )
             review_time += args.separator_seconds
             if caption_mode == "pillow":
-                make_caption_image(after_caption_image, after_caption, args.scale_width)
+                make_caption_image(
+                    after_caption_image,
+                    after_caption,
+                    args.scale_width,
+                    caption_height,
+                    args.caption_font_size,
+                )
             make_clip(
                 video,
                 after_clip,
@@ -439,6 +492,8 @@ def main() -> None:
                 after_caption,
                 args.scale_width,
                 caption_mode,
+                caption_height,
+                args.caption_font_size,
                 after_caption_image if caption_mode == "pillow" else None,
             )
             caption_rows.append(

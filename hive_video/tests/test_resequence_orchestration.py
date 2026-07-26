@@ -259,10 +259,32 @@ class ExactOrderReviewTests(unittest.TestCase):
             subprocess.run(command, check=True, capture_output=True, text=True)
             self.assertTrue(out.is_file())
             self.assertGreater(out.stat().st_size, 0)
+            dimensions = subprocess.check_output(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height",
+                    "-of",
+                    "csv=p=0",
+                    str(out),
+                ],
+                text=True,
+            ).strip()
+            self.assertEqual(
+                dimensions,
+                f"64,{make_join_review_video.probe_scaled_height(source, 64) + 40}",
+            )
             captions = out.with_suffix(".captions.csv")
             self.assertTrue(captions.is_file())
             with captions.open(newline="") as handle:
-                self.assertEqual(len(list(csv.DictReader(handle))), 6)
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 6)
+            self.assertIn("before f39", rows[0]["caption"])
+            self.assertNotIn("before end frame", rows[0]["caption"])
 
     def test_review_uses_every_actual_order_join_including_rank_two(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
