@@ -35,10 +35,22 @@ hv_sync_env
 hv_require_ffmpeg
 hv_resolve "${QC_LOCATOR}"
 
-QC_ROLL="${HV_REVIEW_DIR}/qc_roll_greedy_order.mp4"
+QC_ROLL="${QC_ROLL:-${HV_REVIEW_DIR}/qc_roll_greedy_order.mp4}"
+if [ ! -f "${QC_ROLL}" ] && [ -f "${HV_REVIEW_DIR}/qc_roll_flagged_joins.mp4" ]; then
+  AUTO_QC_SUMMARY="${HV_REVIEW_DIR}/auto_qc.summary.json"
+  if [ -f "${AUTO_QC_SUMMARY}" ]; then
+    AUTO_QC_DECISION="$(uv run --no-sync python -c \
+      'import json,sys; print(json.load(open(sys.argv[1]))["decision"])' \
+      "${AUTO_QC_SUMMARY}")"
+    if [ "${AUTO_QC_DECISION}" = "manual_review_required" ]; then
+      QC_ROLL="${HV_REVIEW_DIR}/qc_roll_flagged_joins.mp4"
+      echo "Using the current flagged-only Stage 1a roll: ${QC_ROLL}"
+    fi
+  fi
+fi
 SMOKE_DIR="${HV_WORK_DIR}/qc_compression_smoke"
 hv_require_file "${QC_ROLL}" \
-  "Stage 1a must finish before its QC roll can be used for compression comparison."
+  "No QC roll exists. Rerun Stage 1a with WRITE_ALL_QC_ROLLS=1, or set QC_ROLL explicitly."
 mkdir -p "${SMOKE_DIR}"
 
 for quality in ${QC_QUALITIES}; do

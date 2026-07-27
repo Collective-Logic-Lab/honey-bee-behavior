@@ -8,8 +8,9 @@ are intended to be run from the `hive_video/` directory with `uv run python`.
 ### Start here: the scripted pipeline
 
 On the cluster you should not be driving these tools one at a time. The wrappers
-in `src/pipeline/slurm/resequence/` run the whole sequence, resolve every path
-from a single locator, and stop at the one point that needs a human:
+in `src/pipeline/slurm/resequence/` run the whole sequence and resolve every
+path from a single locator. Source cuts are inspected once; segment joins are
+sent to a human only when automatic QC flags them:
 
 ```bash
 sbatch src/pipeline/slurm/resequence/download_raw_array.sh       # fetch raw video from Edmond
@@ -19,7 +20,7 @@ sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and
 # inspect qc/candidates.csv and qc/cut_review.proposed.csv
 # (save qc/cut_review.verified.csv only when you edit a cut)
 
-sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh # order + green review
+sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh # order + auto-QC
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # final render, then upload
 
 # Compare high/medium/low on the complete Start 04 side 1 QC roll and upload
@@ -37,9 +38,15 @@ sbatch src/pipeline/slurm/resequence/compress_existing_low_backfill_array.sh
 Stage 1 covers steps 1 and 2 below and prepares an editable cut table without
 writing hundreds of JPEGs. Stage 1a uses the inspected proposal directly, or
 `cut_review.verified.csv` when cuts were edited; it then covers steps 3 and 4
-with the established trajectory-10 ordering and writes the green-flash QC roll.
-Stage 2 only performs the final render and upload after those outputs exist.
-Completed steps and validated video parts resume safely after a wall-clock kill.
+with the established trajectory-10 ordering. The automatic join diagnostic
+scores every chosen boundary. Clean videos pass without a second human loop;
+flagged videos receive a green-flash roll containing only the joins requiring
+review, and Stage 2 requires a report-bound approval. Stage 2 then performs the
+final render and upload. Completed steps and validated video parts resume safely
+after a wall-clock kill. Each remote video folder carries
+`CURRENT_ARTIFACTS.json`; the upload preserves older bucket objects for audit,
+but publishes the manifest only after payload verification, and only its listed
+files belong to the current validated run.
 
 Compression is intentionally separate from resequencing: it creates a smaller
 H.264 sharing derivative while retaining the full-fidelity resequenced MP4.
@@ -97,8 +104,18 @@ pipeline rather than produce the final video directly.
   frame ranges. Use this to justify any forced cuts added to segment production.
 
 - `diagnostics/make_join_review_video.py`
-  Builds short before/after clips for candidate joins. This is useful for human
-  review of ordering quality before rendering a full reassembled video.
+  Builds short before/after clips for candidate joins or filters an exact order
+  to the joins listed by automatic QC.
+
+- `diagnostics/auto_qc_segment_joins.py`
+  Scores the exact chosen boundaries with the detector feature, ranks every
+  possible successor, and emits a conservative video-level `auto_pass` or
+  `manual_review_required` decision.
+
+- `diagnostics/approve_manual_join_qc.py`
+  Records a manual approval whose checksums are bound to one exact flagged
+  auto-QC report, flagged table, review MP4, and caption manifest, and rejects
+  stale approvals after any of them change.
 
 ### Safeword
 

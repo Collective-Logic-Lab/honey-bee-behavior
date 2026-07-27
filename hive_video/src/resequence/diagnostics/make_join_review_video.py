@@ -52,6 +52,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--join-filter-csv",
+        type=Path,
+        help=(
+            "With --order-csv, render only the 1-based join_index values listed in "
+            "this CSV. The auto-QC flagged-joins CSV can be passed directly."
+        ),
+    )
+    parser.add_argument(
         "--seconds-each-side",
         type=float,
         default=2.0,
@@ -120,6 +128,7 @@ def read_order_edges(
     order_path: Path,
     ranked_edges_path: Path,
     limit: int | None,
+    join_indices: set[int] | None = None,
 ) -> list[dict]:
     segments: dict[int, dict[str, int]] = {}
     with segments_path.open(newline="") as handle:
@@ -164,10 +173,16 @@ def read_order_edges(
             }
 
     edges = []
-    for from_segment_id, to_segment_id in zip(segment_ids, segment_ids[1:]):
+    for join_index, (from_segment_id, to_segment_id) in enumerate(
+        zip(segment_ids, segment_ids[1:]),
+        start=1,
+    ):
+        if join_indices is not None and join_index not in join_indices:
+            continue
         score = ranked.get((from_segment_id, to_segment_id), {})
         edges.append(
             {
+                "join_index": join_index,
                 "from_segment_id": from_segment_id,
                 "to_segment_id": to_segment_id,
                 "from_end_frame_idx": segments[from_segment_id]["end_frame_idx"],
@@ -176,7 +191,85 @@ def read_order_edges(
                 "mean_abs_diff": score.get("mean_abs_diff"),
             }
         )
+    if join_indices is not None:
+        found = {int(edge["join_index"]) for edge in edges}
+        unknown = sorted(join_indices - found)
+        if unknown:
+            raise ValueError(
+                f"Join filter references indices outside the complete order: {unknown}"
+            )
     return edges if limit is None else edges[:limit]
+
+
+def read_join_indices(path: Path) -> set[int]:
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None or "join_index" not in reader.fieldnames:
+            raise ValueError(f"Join filter CSV needs a join_index column: {path}")
+        indices = {int(row["join_index"]) for row in reader}
+    if not indices:
+        raise ValueError(f"Join filter CSV contains no flagged joins: {path}")
+    if min(indices) < 1:
+        raise ValueError(f"join_index values must be positive: {path}")
+    return indices
+
+
+def read_join_frame_overrides(path: Path) -> dict[int, dict[str, int | str]]:
+    overrides: dict[int, dict[str, int | str]] = {}
+    with path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            join_index = int(row["join_index"])
+            actual_end = str(row.get("from_actual_end_frame_idx") or "").strip()
+            actual_start = str(
+                row.get("to_actual_start_frame_idx")
+                or row.get("to_start_frame_idx")
+                or ""
+            ).strip()
+            values: dict[str, int | str] = {}
+            if actual_end:
+                values["from_end_frame_idx"] = int(actual_end)
+            if actual_start:
+                values["to_start_frame_idx"] = int(actual_start)
+            for source_field, target_field in (
+                ("selected_mean_abs_diff", "auto_qc_distance"),
+                ("selected_rank", "auto_qc_rank"),
+                ("margin_ratio", "auto_qc_margin_ratio"),
+                ("robust_z", "auto_qc_robust_z"),
+                ("decision", "auto_qc_decision"),
+                ("reasons", "auto_qc_reasons"),
+            ):
+                text = str(row.get(source_field) or "").strip()
+                if text:
+                    values[target_field] = text
+            if values:
+                overrides[join_index] = values
+    return overrides
+
+
+def compact_qc_value(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "?"
+    try:
+        return f"{float(text):.2f}"
+    except ValueError:
+        return text
+
+
+def compact_qc_reasons(value: object) -> str:
+    replacements = {
+        "selected_successor_not_rank1": "rank>1",
+        "robust_z_above_max": "z>max",
+        "margin_ratio_below_min": "margin<min",
+        "detector_mad_not_positive": "MAD=0",
+        "incomplete_successor_candidate_scores": "incomplete candidates",
+        "missing_from_actual_end_frame": "missing end frame",
+        "missing_selected_start_frame": "missing start frame",
+        "from_segment_emits_no_frames": "empty source segment",
+        "selected_segment_emits_no_frames": "empty successor segment",
+    }
+    reasons = str(value or "flagged").split(";")
+    return ",".join(replacements.get(reason, reason) for reason in reasons)
 
 
 def ffmpeg_escape_text(text: str) -> str:
@@ -369,14 +462,29 @@ def main() -> None:
 
     if (args.order_csv is None) != (args.segments is None):
         raise ValueError("--order-csv and --segments must be provided together")
+    if args.join_filter_csv is not None and args.order_csv is None:
+        raise ValueError("--join-filter-csv requires --order-csv and --segments")
     if args.order_csv is not None:
+        join_indices = (
+            read_join_indices(args.join_filter_csv.expanduser().resolve())
+            if args.join_filter_csv is not None
+            else None
+        )
+        join_frame_overrides = (
+            read_join_frame_overrides(args.join_filter_csv.expanduser().resolve())
+            if args.join_filter_csv is not None
+            else {}
+        )
         edges = read_order_edges(
             args.segments.expanduser().resolve(),
             args.order_csv.expanduser().resolve(),
             ranked_edges,
             args.limit,
+            join_indices,
         )
-        review_mode = "exact order"
+        for edge in edges:
+            edge.update(join_frame_overrides.get(int(edge["join_index"]), {}))
+        review_mode = "flagged exact-order joins" if join_indices is not None else "exact order"
     else:
         edges = read_edges(
             ranked_edges,
@@ -408,17 +516,33 @@ def main() -> None:
         tmp = Path(tmpdir)
         clips = []
         review_time = 0.0
-        for join_index, edge in enumerate(edges, start=1):
-            before_start = edge["from_end_frame_idx"] / args.fps - args.seconds_each_side
+        for rendered_index, edge in enumerate(edges, start=1):
+            join_index = int(edge.get("join_index", rendered_index))
+            before_start = (
+                (edge["from_end_frame_idx"] + 1) / args.fps - args.seconds_each_side
+            )
             after_start = edge["to_start_frame_idx"] / args.fps
             rank = edge.get("rank_for_from_segment")
             rank_text = str(rank) if rank is not None else "not-retained"
             difference = edge.get("mean_abs_diff")
             difference_text = f"{difference:.3f}" if difference is not None else "not-retained"
-            shared = (
-                f"join {join_index:03d} | rank {rank_text} | "
-                f"S{edge['from_segment_id']} -> S{edge['to_segment_id']} | score {difference_text}"
-            )
+            if edge.get("auto_qc_decision"):
+                reason_text = compact_qc_reasons(edge.get("auto_qc_reasons"))
+                shared = (
+                    f"join {join_index:03d} | S{edge['from_segment_id']} -> "
+                    f"S{edge['to_segment_id']} | AUTO-QC "
+                    f"d={compact_qc_value(edge.get('auto_qc_distance'))} "
+                    f"z={compact_qc_value(edge.get('auto_qc_robust_z'))} "
+                    f"rank={edge.get('auto_qc_rank', '?')} "
+                    f"margin={compact_qc_value(edge.get('auto_qc_margin_ratio'))} | "
+                    f"{reason_text}"
+                )
+            else:
+                shared = (
+                    f"join {join_index:03d} | rank {rank_text} | "
+                    f"S{edge['from_segment_id']} -> S{edge['to_segment_id']} | "
+                    f"score {difference_text}"
+                )
             before_caption = f"{shared} | before f{edge['from_end_frame_idx']}"
             after_caption = f"{shared} | after f{edge['to_start_frame_idx']}"
             before_clip = tmp / f"join_{join_index:03d}_before.mp4"

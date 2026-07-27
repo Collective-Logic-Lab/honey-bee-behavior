@@ -60,7 +60,8 @@ This syncs distribution files into `data/artifacts/` and `data/experiments/`. Di
 
 The archived hive videos cut to a different part of the recording every few
 minutes. Resequencing puts them back in order. End to end that is four `sbatch`
-submissions with one manual check in the middle, all from `hive_video/`.
+submissions from `hive_video/`, with source-cut inspection and manual join
+review only when the automatic join diagnostic flags a video.
 
 #### 1. Download the raw video
 
@@ -134,17 +135,41 @@ actually change a cut. To extract still frames for a specific investigation,
 run `detect_video_discontinuities.py` directly with
 `--write-candidate-frames`; it is not part of the normal array output.
 
-#### 5. Stage 1a, make and inspect the green-flash order review
+#### 5. Stage 1a, order segments and check every join
 
 ```bash
 sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh
 ```
 
 Builds segments from the inspected proposal (or an edited verified table),
-applies the established trajectory signature with 10-frame windows, and creates
-`review/qc_roll_greedy_order.mp4`: a green-flash QC roll containing every join
-in that exact greedy order. It stops before full reassembly and does not upload
-anything, so the compact review MP4 can be inspected first.
+applies the established trajectory signature with 10-frame windows, and then
+checks every selected join using the direct one-frame discontinuity feature.
+The diagnostic requires the selected successor to rank first among the
+still-unused segments, retain a two-fold margin over the runner-up, and remain
+below the recorded robust-score threshold. Its auditable outputs are:
+
+```text
+review/auto_qc.join_scores.csv
+review/auto_qc.flagged_joins.csv
+review/auto_qc.summary.json
+```
+
+An `auto_pass` result needs no manual join review. If any join is ambiguous,
+discontinuous, or unscorable, the video receives
+`manual_review_required` and Stage 1a creates
+`review/qc_roll_flagged_joins.mp4` containing only those joins. After inspecting
+that compact roll, bind the approval to the exact report, flagged table, roll,
+and captions with the command printed in the Stage 1a log:
+
+```bash
+uv run --no-sync python src/resequence/diagnostics/approve_manual_join_qc.py create \
+  --summary <work-dir>/review/auto_qc.summary.json \
+  --out <work-dir>/review/auto_qc.manual_approval.json
+```
+
+Changing the order, inputs, thresholds, or report invalidates the approval.
+The method, calibration evidence, and limitations are recorded in
+`METHODS.md` under `HV-R001`.
 
 #### 6. Stage 2, reassemble and back up
 
@@ -152,12 +177,16 @@ anything, so the compact review MP4 can be inspected first.
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
 
-Consumes the checked Stage 1a segments and order, then renders the archival
-MP4. A dependent job publishes the validated MP4 and its audit artifacts to
+Consumes an automatically cleared order, or a flagged order with a current
+manual approval, then renders the archival MP4. A dependent job publishes the
+validated MP4 and its audit artifacts to
 `hf://buckets/collective-logic-lab/honey-bee/resequenced/reseq_<key>`. The
 backup runs on its own wall clock so it is not competing with the reassembly.
 Uploading needs write access to the bucket: run `hf auth login` on the cluster
-once, or set `HF_TOKEN` in the job environment.
+once, or set `HF_TOKEN` in the job environment. Bucket sync is deliberately
+non-deleting; `CURRENT_ARTIFACTS.json` is the machine-readable authority for
+the current file set, is published only after payload verification, and marks
+any older unlisted review objects as superseded.
 
 #### 7. Compare sharing profiles on a QC roll
 
@@ -224,7 +253,7 @@ Work for one video lives under
 | `qc/` | compact discontinuity candidates, jump events, and cut-review CSVs |
 | `segments/` | segment definitions |
 | `order/` | ranked joins and the trajectory-10 greedy order |
-| `review/` | every join in the exact rendered order |
+| `review/` | automatic join scores and, only when flagged, a compact QC roll and approval |
 | `output/` | the reassembled MP4 and its frame map |
 | `upload/` | exactly what gets published to HuggingFace |
 | `compression_smoke/` | high, medium, and low short comparison clips |

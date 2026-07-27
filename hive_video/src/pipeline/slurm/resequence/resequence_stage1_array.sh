@@ -62,13 +62,16 @@ hv_require_file "${RESEQ_PATH}" \
 mkdir -p "${HV_QC_DIR}"
 
 CANDIDATES="${HV_QC_DIR}/candidates.csv"
+DETECT_METADATA="${HV_QC_DIR}/metadata.json"
 EVENTS="${HV_QC_DIR}/jump_events.csv"
 CUT_PROPOSAL="${HV_QC_DIR}/cut_review.proposed.csv"
 DETECT_DONE="${HV_QC_DIR}/.detect.complete"
 EVENTS_DONE="${HV_QC_DIR}/.summarize.complete"
 CUT_REVIEW_DONE="${HV_QC_DIR}/.cut_review.complete"
 
-DETECT_SIGNATURE="v2|key=${RESEQ_KEY}|tool=$(hv_file_fingerprint \
+RAW_FINGERPRINT="$(hv_file_stat_fingerprint "${RESEQ_PATH}")"
+DETECT_SIGNATURE="v3|key=${RESEQ_KEY}|raw=${RAW_FINGERPRINT}|archive_md5=${RESEQ_MD5:-unknown}"
+DETECT_SIGNATURE="${DETECT_SIGNATURE}|tool=$(hv_file_fingerprint \
   src/resequence/detect_video_discontinuities.py)|top_n=${TOP_N:-400}"
 DETECT_SIGNATURE="${DETECT_SIGNATURE}|sample_width=${SAMPLE_WIDTH:-default}"
 DETECT_SIGNATURE="${DETECT_SIGNATURE}|mad_z=${MAD_Z:-default}"
@@ -76,7 +79,8 @@ DETECT_SIGNATURE="${DETECT_SIGNATURE}|min_distance=${MIN_DISTANCE:-default}"
 DETECT_SIGNATURE="${DETECT_SIGNATURE}|threshold_mode=${THRESHOLD_MODE:-default}"
 DETECT_SIGNATURE="${DETECT_SIGNATURE}|expected_interval=${EXPECTED_INTERVAL_FRAMES:-default}"
 
-if hv_step_needed "${DETECT_DONE}" "${DETECT_SIGNATURE}" "${CANDIDATES}"; then
+if hv_step_needed \
+    "${DETECT_DONE}" "${DETECT_SIGNATURE}" "${CANDIDATES}" "${DETECT_METADATA}"; then
   rm -f "${DETECT_DONE}" "${EVENTS_DONE}" "${CUT_REVIEW_DONE}"
   DETECT=(
     uv run --no-sync python src/resequence/detect_video_discontinuities.py
@@ -95,6 +99,7 @@ if hv_step_needed "${DETECT_DONE}" "${DETECT_SIGNATURE}" "${CANDIDATES}"; then
   fi
   hv_time_step "detect_discontinuities" "${DETECT[@]}"
   hv_require_file "${CANDIDATES}" "Detection completed without candidates.csv."
+  hv_require_file "${DETECT_METADATA}" "Detection completed without metadata.json."
   hv_mark_complete "${DETECT_DONE}" "${DETECT_SIGNATURE}"
 fi
 

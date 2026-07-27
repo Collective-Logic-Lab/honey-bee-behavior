@@ -175,6 +175,31 @@ hv_file_fingerprint() {
   cksum "$1" | awk '{ print $1 ":" $2 }'
 }
 
+# Produce one stable, readable fingerprint for a small bundle of named files.
+# Completion markers use this to bind their generated artifacts, not just the
+# inputs that produced them.
+hv_file_bundle_fingerprint() {
+  local first=1
+  local path
+  for path in "$@"; do
+    if [ "${first}" = "0" ]; then
+      printf '|'
+    fi
+    printf '%s=%s' "$(basename "${path}")" "$(hv_file_fingerprint "${path}")"
+    first=0
+  done
+  printf '\n'
+}
+
+# Fingerprint a very large immutable input without rereading all of it. Raw
+# downloads are already MD5-verified; size and nanosecond mtime make restart
+# markers notice a later replacement or edit.
+hv_file_stat_fingerprint() {
+  uv run --no-sync python -c \
+    'import os,sys; value=os.stat(sys.argv[1]); print(f"{value.st_size}:{value.st_mtime_ns}")' \
+    "$1"
+}
+
 # Print a wall-clock duration for a named step so the smoke test can report timings.
 hv_time_step() {
   local label="$1"

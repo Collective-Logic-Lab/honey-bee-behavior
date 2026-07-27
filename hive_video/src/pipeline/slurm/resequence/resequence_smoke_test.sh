@@ -4,9 +4,9 @@
 #   sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh
 #
 # Runs the full pipeline over a bounded slice of one real video and reports
-# separate detection, ordering, review, and reassembly timings. The cut review
-# uses the single-jump proposal automatically for timing only; it is not a
-# substitute for the manual production gate.
+# separate detection, ordering, automatic join-QC, review, and reassembly
+# timings. The cut review uses the single-jump proposal automatically for
+# timing only; it is not a substitute for the production cut inspection.
 #
 # Nothing here writes into the real work directory; everything lands under
 # <work dir>/smoke so it cannot be mistaken for a production artifact.
@@ -111,6 +111,19 @@ hv_time_step "order_segments" \
     --signature trajectory \
     --top-k 10
 
+hv_time_step "auto_qc_segment_joins" \
+  uv run --no-sync python src/resequence/diagnostics/auto_qc_segment_joins.py \
+    "${RESEQ_PATH}" \
+    --segments "${SMOKE_DIR}/segments/segments.csv" \
+    --order-csv "${SMOKE_DIR}/order/greedy_order.csv" \
+    --detector-metadata "${SMOKE_DIR}/qc/metadata.json" \
+    --out-dir "${SMOKE_DIR}/review" \
+    --max-robust-z "${AUTO_QC_MAX_ROBUST_Z:-15.0}" \
+    --min-margin-ratio "${AUTO_QC_MIN_MARGIN_RATIO:-2.0}" \
+    --progress-every-seconds "${PROGRESS_EVERY_SECONDS:-60}"
+
+# Always render the full bounded review in the smoke job so this path is tested
+# even when the automatic decision passes.
 hv_time_step "join_review_video" \
   uv run --no-sync python src/resequence/diagnostics/make_join_review_video.py \
     "${RESEQ_PATH}" \
