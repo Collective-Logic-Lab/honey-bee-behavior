@@ -70,20 +70,25 @@ The tracked two-video integration pilot fixes the inputs to Start 01 and Start
 Stage 1a, outcome filing, Stage 2, and maximum-compression paths:
 
 ```bash
-bash src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e.sh
+bash src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e_v2.sh
 ```
 
 It takes no arguments and refuses a dirty or unpublished checkout, inherited
 `SBATCH_*` overrides, an existing submission record, or a nonempty remote
-prefix. Source-cut proposals are explicitly marked `unreviewed_pilot`.
+prefix. Before submission it refreshes the Edmond manifest and verifies both
+actual media redirect paths with one-byte ranged GETs using Sol's tracked CA
+bundle. Source-cut proposals are explicitly marked `unreviewed_pilot`.
 Every Stage 1a result is filed under
-`resequenced/pilots/start01_start02_side0_top_v1/`; flagged videos stop there
+`resequenced/pilots/start01_start02_side0_top_v2/`; flagged videos stop there
 cleanly, while automatically cleared videos continue to an archival MP4 and a
 `low` (CRF 28) sharing derivative. Pilot artifacts do not replace the validated
 inventory. Scratch work also uses the disjoint
-`artifacts/resequence_pilots/start01_start02_side0_top_v1/` root, whose marker
+`artifacts/resequence_pilots/start01_start02_side0_top_v2/` root, whose marker
 prevents later generic compression/upload commands from losing that
-provenance.
+provenance. v1 is retained as the failed TLS-at-download attempt rather than
+being overwritten or requeued with changed settings. The launcher verifies the
+retained v1 record and incrementally files v2's submission/job-ID record under
+the private pilot prefix.
 
 #### 1. Download the raw video
 

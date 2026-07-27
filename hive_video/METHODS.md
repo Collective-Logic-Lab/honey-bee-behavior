@@ -91,7 +91,7 @@ replacing the rule.
 
 ## HV-R002: Start 01 / Start 02 unattended pipeline pilot
 
-**Status:** bounded pilot authorized, 2026-07-26
+**Status:** v1 failed before media transfer, 2026-07-27
 
 **Decision.** Run one fixed end-to-end pilot on the top panel of side 0 for
 Start 01 and Start 02:
@@ -129,3 +129,63 @@ estimate that rate.
 **Revisit when.** Inspect both filed Stage 1a outcomes and every produced final
 video. Promote nothing from the pilot prefix into validated inventory until
 the source-cut limitation and any naturally flagged joins have been reviewed.
+
+**Observed v1 outcome.** Revision
+`86cad78be24f81590ed47cd639c71ed76551a0f0` launched download array
+`59712692`. The cached manifest resolved both requested files, but the first
+actual media request failed TLS certificate verification because the tracked
+launcher did not carry the Sol CA-bundle setting used by the earlier successful
+downloads. The recorded `aftercorr` / `--kill-on-invalid-dep=yes` chain makes
+corresponding dependent tasks invalid rather than advancing them. The v1
+scratch root, submission record, and empty-or-partial remote prefix remain the
+failed-attempt record and must not be deleted or reused.
+
+## HV-R003: Verified archive TLS and Start 01 / Start 02 pilot v2
+
+**Status:** tracked bounded retry prepared, not yet launched, 2026-07-27
+
+**Decision.** Retry the unchanged Start 01 / Start 02 scientific plan as
+`start01_start02_side0_top_v2` from a new reviewed Git revision. The v2 parent
+pins Sol's readable `/etc/pki/tls/certs/ca-bundle.crt`, and the downloader
+builds one verified TLS context containing Python defaults, certifi roots,
+available system roots, and any explicitly configured CA bundle. Hostname and
+certificate verification remain mandatory.
+
+Before submitting Slurm jobs, v2 refreshes the Edmond manifest and performs a
+one-byte ranged GET for each selected media file. Each probe must follow the
+same HTTPS redirect path as a download, return HTTP 206 with a
+`Content-Range` total equal to the manifest size, and remain HTTPS. This tests
+both the manifest and large-media trust paths without downloading the videos
+on the login node.
+
+v2 has disjoint local and remote roots:
+
+- `artifacts/resequence_pilots/start01_start02_side0_top_v2/`;
+- `resequenced/pilots/start01_start02_side0_top_v2/`.
+
+Only `/scratch/pdressla/honey-bee/downloads/` remains shared. A valid `.part`
+file may resume there because the downloader verifies the final byte count and
+whole-file archive MD5 before Stage 1 can consume it. The v2 submission record
+binds the failed v1 job, prior revision and submission-record hash, TLS trust
+file, and retry reason. The validated v1 marker and full submission record are
+copied into v2's private `pilot_run/` prefix as retained prior-attempt
+evidence. v2 refuses to start while any v1 job ID is still active in `squeue`.
+Before each allocation is added to the dependency chain, the parent validates
+its numeric Slurm ID and publishes the next append-only
+`submission.step00.tsv` through `submission.step04.tsv` snapshot under the
+private v2 prefix. After all four IDs are recorded, it publishes and byte-size
+verifies the final
+`pilot_run/submission.tsv`, so scheduler provenance does not live only on
+scratch even if a later stage fails. The download array is submitted held and
+released only after that durable record is verified; if filing fails, no pilot
+compute advances under an incompletely recorded plan.
+
+**Alternatives considered.** Disabling certificate verification was rejected.
+Requeuing v1 with an ad hoc environment override was rejected because it would
+change a launched plan without a new attempt record. Deleting v1's submission
+record or reusing its artifact prefixes was rejected because it would erase
+the distinction between failed and corrected attempts.
+
+**Revisit when.** Revisit the CA selection only if Sol changes its system trust
+path or the verified media probe fails. Revisit the scientific plan under the
+same conditions recorded in HV-R002 after v2 produces filed outcomes.

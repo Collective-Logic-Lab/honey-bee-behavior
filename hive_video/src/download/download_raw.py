@@ -41,6 +41,7 @@ import json
 import os
 import re
 import shlex
+import ssl
 import sys
 import tempfile
 import time
@@ -49,6 +50,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+import certifi
 
 DEFAULT_SERVER = "https://edmond.mpg.de"
 DEFAULT_DOI = "doi:10.17617/3.LLWRWR"
@@ -65,6 +68,11 @@ LOCATOR_RE = re.compile(
 
 CHUNK_BYTES = 8 * 1024 * 1024
 USER_AGENT = "hive-video-download-raw/1.0"
+SYSTEM_CA_BUNDLE_CANDIDATES = (
+    Path("/etc/pki/tls/certs/ca-bundle.crt"),
+    Path("/etc/ssl/certs/ca-certificates.crt"),
+    Path("/etc/ssl/cert.pem"),
+)
 
 
 @dataclass(frozen=True)
@@ -97,24 +105,103 @@ class RemoteFile:
         return f"reseq_{self.key}"
 
 
+class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse a redirect before contacting a non-HTTPS destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlparse(newurl).scheme.lower() != "https":
+            fp.close()
+            raise RuntimeError(
+                "Refused a non-HTTPS redirect from the Edmond archive before contacting it."
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def default_cache_path(doi: str) -> Path:
     root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "hive_video"
     slug = re.sub(r"[^A-Za-z0-9]+", "_", doi).strip("_")
     return root / f"edmond_manifest_{slug}.json"
 
 
-def _http_get(url: str, timeout: float, headers: dict[str, str] | None = None):
+def build_ssl_context(
+    ca_bundle: Path | None = None,
+) -> tuple[ssl.SSLContext, tuple[Path, ...]]:
+    """Build one verifying TLS context for manifest and media requests.
+
+    uv-managed standalone Python builds do not always discover a Linux
+    distribution's CA bundle. Keep Python's default roots, then add certifi,
+    the common system bundle locations, and any explicitly configured bundle.
+    """
+    configured: list[tuple[Path, bool]] = []
+    if ca_bundle is not None:
+        configured.append((ca_bundle.expanduser(), True))
+    environment_bundle = os.environ.get("SSL_CERT_FILE")
+    if environment_bundle:
+        configured.append((Path(environment_bundle).expanduser(), True))
+    configured.append((Path(certifi.where()), True))
+    configured.extend((candidate, False) for candidate in SYSTEM_CA_BUNDLE_CANDIDATES)
+
+    for candidate, required in configured:
+        if required and not candidate.is_file():
+            raise FileNotFoundError(f"Configured CA bundle is missing or not a file: {candidate}")
+
+    context = ssl.create_default_context()
+    loaded: list[Path] = []
+    seen: set[Path] = set()
+    for candidate, _required in configured:
+        if not candidate.is_file():
+            continue
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        context.load_verify_locations(cafile=str(resolved))
+        loaded.append(resolved)
+        seen.add(resolved)
+    return context, tuple(loaded)
+
+
+def _is_certificate_verification_error(error: urllib.error.URLError) -> bool:
+    return isinstance(error.reason, ssl.SSLCertVerificationError)
+
+
+def _http_get(
+    url: str,
+    timeout: float,
+    headers: dict[str, str] | None,
+    ssl_context: ssl.SSLContext,
+):
+    if urllib.parse.urlparse(url).scheme.lower() != "https":
+        raise ValueError("Refused a non-HTTPS archive request.")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    return urllib.request.urlopen(request, timeout=timeout)
+    opener = urllib.request.build_opener(
+        HTTPSOnlyRedirectHandler(),
+        urllib.request.HTTPSHandler(context=ssl_context),
+    )
+    try:
+        return opener.open(request, timeout=timeout)
+    except urllib.error.URLError as error:
+        if _is_certificate_verification_error(error):
+            raise RuntimeError(
+                "TLS certificate verification failed for the Edmond archive. "
+                "The downloader kept verification enabled and loaded Python, certifi, "
+                "and available system roots. If the cluster requires another trust root, "
+                "provide it with --ca-bundle or SSL_CERT_FILE."
+            ) from error
+        raise
 
 
-def fetch_manifest(server: str, doi: str, timeout: float) -> list[dict]:
+def fetch_manifest(
+    server: str,
+    doi: str,
+    timeout: float,
+    ssl_context: ssl.SSLContext,
+) -> list[dict]:
     """Fetch the dataset file listing from the Dataverse native API."""
     url = (
         f"{server}/api/datasets/:persistentId/versions/:latest/files"
         f"?persistentId={urllib.parse.quote(doi, safe=':.')}"
     )
-    with _http_get(url, timeout) as response:
+    with _http_get(url, timeout, None, ssl_context) as response:
         payload = json.load(response)
     if payload.get("status") != "OK":
         raise RuntimeError(f"Dataverse API returned status {payload.get('status')!r} for {doi}")
@@ -122,7 +209,12 @@ def fetch_manifest(server: str, doi: str, timeout: float) -> list[dict]:
 
 
 def load_manifest(
-    server: str, doi: str, cache_path: Path, refresh: bool, timeout: float
+    server: str,
+    doi: str,
+    cache_path: Path,
+    refresh: bool,
+    timeout: float,
+    ssl_context: ssl.SSLContext | None = None,
 ) -> list[RemoteFile]:
     """Load the file listing, using a local cache unless ``refresh`` is set.
 
@@ -138,7 +230,9 @@ def load_manifest(
         except (OSError, json.JSONDecodeError):
             raw = None
     if raw is None:
-        raw = fetch_manifest(server, doi, timeout)
+        if ssl_context is None:
+            ssl_context, _ca_files = build_ssl_context()
+        raw = fetch_manifest(server, doi, timeout, ssl_context)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp: Path | None = None
         try:
@@ -242,6 +336,7 @@ def download(
     timeout: float,
     retries: int,
     progress_seconds: float,
+    ssl_context: ssl.SSLContext,
 ) -> None:
     """Download ``remote`` to ``destination``, resuming a partial ``.part`` file.
 
@@ -262,7 +357,7 @@ def download(
 
         headers = {"Range": f"bytes={have}-"} if have else {}
         try:
-            with _http_get(url, timeout, headers) as response:
+            with _http_get(url, timeout, headers, ssl_context) as response:
                 if have and response.status != 206:
                     # Server ignored the range request; start over rather than corrupt.
                     print(f"  server returned {response.status} for a range request; restarting")
@@ -302,6 +397,43 @@ def download(
         raise SystemExit(f"Giving up on {remote.filename} after {retries} attempts.")
 
     part.replace(destination)
+
+
+def probe_download(
+    remote: RemoteFile,
+    server: str,
+    timeout: float,
+    ssl_context: ssl.SSLContext,
+) -> None:
+    """Verify the media endpoint and its redirects while reading only one byte."""
+    url = f"{server}/api/access/datafile/{remote.file_id}"
+    with _http_get(url, timeout, {"Range": "bytes=0-0"}, ssl_context) as response:
+        status = getattr(response, "status", None)
+        if status != 206:
+            raise RuntimeError(
+                f"Media probe expected HTTP 206 but received {status} for {remote.filename}"
+            )
+        content_range = response.headers.get("Content-Range", "")
+        match = re.fullmatch(r"bytes 0-0/(\d+)", content_range)
+        if match is None:
+            raise RuntimeError(
+                f"Media probe returned invalid Content-Range {content_range!r} "
+                f"for {remote.filename}"
+            )
+        response_size = int(match.group(1))
+        if remote.size and response_size != remote.size:
+            raise RuntimeError(
+                f"Media probe size mismatch for {remote.filename}: "
+                f"manifest={remote.size}, endpoint={response_size}"
+            )
+        final_url = response.geturl()
+        if (
+            urllib.parse.urlparse(server).scheme == "https"
+            and urllib.parse.urlparse(final_url).scheme != "https"
+        ):
+            raise RuntimeError(f"Media probe refused an HTTPS downgrade for {remote.filename}")
+        if response.read(1) == b"":
+            raise RuntimeError(f"Media probe returned no data for {remote.filename}")
 
 
 def resolve_selection(args: argparse.Namespace) -> tuple[int | None, int | None, str | None]:
@@ -363,6 +495,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the resolved key, filename and local path, then exit without downloading.",
     )
     parser.add_argument(
+        "--probe-only",
+        action="store_true",
+        help=(
+            "Resolve the selection, verify the media TLS/redirect path with a one-byte "
+            "range request, then exit without creating a download."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "sh"),
         default="json",
@@ -388,6 +528,15 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--doi", default=DEFAULT_DOI)
     source.add_argument("--manifest-cache", type=Path, default=None)
     source.add_argument("--refresh-manifest", action="store_true")
+    source.add_argument(
+        "--ca-bundle",
+        type=Path,
+        default=None,
+        help=(
+            "Additional PEM CA bundle. TLS verification remains enabled. "
+            "SSL_CERT_FILE is also honored."
+        ),
+    )
     source.add_argument("--timeout", type=float, default=120.0)
     source.add_argument("--retries", type=int, default=8)
     source.add_argument("--progress-every-seconds", type=float, default=60.0)
@@ -396,8 +545,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    selected_modes = sum((args.list, args.resolve_only, args.probe_only))
+    if selected_modes > 1:
+        raise SystemExit("Choose only one of --list, --resolve-only, or --probe-only.")
+
+    ssl_context, ca_files = build_ssl_context(args.ca_bundle)
+    print(
+        "TLS verification roots: Python defaults plus " + ", ".join(str(path) for path in ca_files),
+        file=sys.stderr,
+    )
     cache_path = args.manifest_cache or default_cache_path(args.doi)
-    files = load_manifest(args.server, args.doi, cache_path, args.refresh_manifest, args.timeout)
+    files = load_manifest(
+        args.server,
+        args.doi,
+        cache_path,
+        args.refresh_manifest,
+        args.timeout,
+        ssl_context,
+    )
 
     if args.list:
         for entry in sorted(files, key=lambda f: (f.start, f.side, f.panel)):
@@ -433,6 +598,12 @@ def main() -> int:
             print(json.dumps(resolved, indent=2))
         return 0
 
+    if args.probe_only:
+        print(f"probing  {remote.locator} -> {remote.filename}")
+        probe_download(remote, args.server, args.timeout, ssl_context)
+        print("media TLS/redirect probe OK")
+        return 0
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     print(f"resolved {remote.locator} -> {remote.filename} ({remote.size / 1e9:.1f} GB)")
     print(f"target   {destination}")
@@ -453,6 +624,7 @@ def main() -> int:
         args.timeout,
         args.retries,
         args.progress_every_seconds,
+        ssl_context,
     )
 
     if not args.no_verify:

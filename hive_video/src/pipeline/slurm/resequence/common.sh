@@ -27,6 +27,17 @@ export UV_CACHE_DIR=${UV_CACHE_DIR:-${SCRATCH_ROOT}/.cache/uv}
 export UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-${SCRATCH_ROOT}/venvs/hive_video_resequence}
 export UV_LINK_MODE=${UV_LINK_MODE:-copy}
 
+# uv's standalone Python does not always discover Sol's Red Hat CA bundle.
+# Honor an explicit bundle, or select the same verified system bundle used by
+# the successful download retry. download_raw.py also adds certifi roots.
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -r /etc/pki/tls/certs/ca-bundle.crt ]; then
+  export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
+fi
+if [ -n "${SSL_CERT_FILE:-}" ] && [ ! -f "${SSL_CERT_FILE}" ]; then
+  echo "SSL_CERT_FILE is missing or not a file: ${SSL_CERT_FILE}" >&2
+  exit 5
+fi
+
 # The resequencing tools are single-threaded per task; keep BLAS from oversubscribing.
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
@@ -70,13 +81,18 @@ hv_require_pilot_context_if_set() {
   if [ -z "${E2E_PILOT_ID:-}" ]; then
     return 0
   fi
-  local expected_id="start01_start02_side0_top_v1"
+  local expected_id
+  case "${E2E_PILOT_ID}" in
+    start01_start02_side0_top_v1|start01_start02_side0_top_v2)
+      expected_id="${E2E_PILOT_ID}"
+      ;;
+    *)
+      echo "Unexpected E2E_PILOT_ID: ${E2E_PILOT_ID}" >&2
+      exit 4
+      ;;
+  esac
   local expected_prefix="${HF_BUCKET}/resequenced/pilots/${expected_id}"
   local expected_root="${SCRATCH_ROOT}/artifacts/resequence_pilots/${expected_id}"
-  if [ "${E2E_PILOT_ID}" != "${expected_id}" ]; then
-    echo "Unexpected E2E_PILOT_ID: ${E2E_PILOT_ID}" >&2
-    exit 4
-  fi
   if [ "${HF_RESEQ_PREFIX}" != "${expected_prefix}" ]; then
     echo "Pilot isolation failure: HF_RESEQ_PREFIX is not the tracked pilot prefix." >&2
     echo "  expected ${expected_prefix}" >&2

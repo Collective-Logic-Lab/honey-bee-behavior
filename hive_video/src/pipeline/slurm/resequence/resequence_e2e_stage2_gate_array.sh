@@ -2,9 +2,9 @@
 # File every Stage 1a outcome, then render and compress only cleared videos.
 #
 # This is the Stage 2 worker for the tracked Start 01 / Start 02 unattended
-# pilot. Submit it through submit_start01_start02_side0_top_e2e.sh so its
-# locators, provenance mode, dependencies, and private pilot destination are
-# fixed together.
+# pilot. Submit it through the current tracked, versioned Start 01 / Start 02
+# parent launcher so its locators, provenance mode, dependencies, and private
+# pilot destination are fixed together.
 #
 # A manual_review_required result is a successful scientific outcome here:
 # its compact report bundle is published and the task stops without requesting

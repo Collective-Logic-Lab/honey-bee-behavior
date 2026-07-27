@@ -1234,6 +1234,55 @@ hv_require_pilot_root_for_path "${RESEQ_ROOT}"
             self.assertEqual(result.returncode, 4)
             self.assertIn("require their tracked pilot context", result.stderr)
 
+    def test_v2_unreviewed_pilot_root_is_allowed_but_untracked_id_is_rejected(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temporary = Path(tmpdir)
+            scratch = temporary / "scratch"
+            pilot_id = "start01_start02_side0_top_v2"
+            pilot_root = scratch / "artifacts/resequence_pilots" / pilot_id
+            pilot_root.mkdir(parents=True)
+            revision = "0123456789abcdef0123456789abcdef01234567"
+            bucket = "hf://buckets/test/honey-bee"
+            prefix = f"{bucket}/resequenced/pilots/{pilot_id}"
+            (pilot_root / ".unreviewed_pilot_root").write_text(
+                f"v1|pilot_id={pilot_id}|git_revision={revision}|hf_prefix={prefix}\n"
+            )
+            repository = Path(__file__).parents[1]
+            script = r"""
+set -eu
+export HIVE_VIDEO_ROOT="$1"
+export SCRATCH_ROOT="$2"
+export RESEQ_ROOT="$3"
+export HF_BUCKET="$4"
+export HF_RESEQ_PREFIX="$5"
+export E2E_PILOT_ID="$6"
+export E2E_EXPECTED_GIT_REVISION="$7"
+source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
+hv_require_pilot_context_if_set
+hv_require_pilot_root_for_path "${RESEQ_ROOT}"
+"""
+            command = [
+                "bash",
+                "-c",
+                script,
+                "bash",
+                str(repository),
+                str(scratch),
+                str(pilot_root),
+                bucket,
+                prefix,
+                pilot_id,
+                revision,
+            ]
+            subprocess.run(command, check=True, capture_output=True, text=True)
+
+            command[-2] = "start01_start02_side0_top_v3"
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("Unexpected E2E_PILOT_ID", result.stderr)
+
     def test_stage1a_cut_review_status_is_bound_to_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1362,29 +1411,76 @@ class EndToEndPilotLauncherTests(unittest.TestCase):
         self.assertIn('--array="${ARRAY_RANGE}%1"', text)
         self.assertIn("resequence_e2e_stage2_gate_array.sh", text)
 
-    def test_launcher_rejects_arguments_and_environment_overrides(self) -> None:
+    def test_v2_launcher_binds_tls_probe_and_failed_v1_provenance(self) -> None:
         repository = Path(__file__).parents[1]
         launcher = (
-            repository
-            / "src/pipeline/slurm/resequence/"
-            "submit_start01_start02_side0_top_e2e.sh"
+            repository / "src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e_v2.sh"
         )
-        with_argument = subprocess.run(
-            ["bash", str(launcher), "start3"],
-            capture_output=True,
-            text=True,
+        text = launcher.read_text()
+        self.assertIn('TRACKED_PILOT_ID="start01_start02_side0_top_v2"', text)
+        self.assertIn('PRIOR_PILOT_ID="start01_start02_side0_top_v1"', text)
+        self.assertIn('PRIOR_DOWNLOAD_JOB="59712692"', text)
+        self.assertIn(
+            'PRIOR_GIT_REVISION="86cad78be24f81590ed47cd639c71ed76551a0f0"',
+            text,
         )
-        self.assertEqual(with_argument.returncode, 2)
-        self.assertIn("zero-argument tracked launcher", with_argument.stderr)
+        self.assertIn('SOL_CA_BUNDLE="/etc/pki/tls/certs/ca-bundle.crt"', text)
+        self.assertIn("--probe-only", text)
+        self.assertIn("--refresh-manifest", text)
+        self.assertIn("verified_tls_chain_fix", text)
+        self.assertIn("PRIOR_SUBMISSION_SHA256", text)
+        self.assertIn("prior_submission_sha256", text)
+        self.assertIn("prior_v1_root_marker.txt", text)
+        self.assertIn("prior_v1_submission.tsv", text)
+        self.assertIn("squeue -h -u pdressla -o '%A'", text)
+        self.assertIn("submission.step00.tsv", text)
+        self.assertIn("submission.step04.tsv", text)
+        self.assertIn('publish_submission_record "${PLAN_DIR}/submission.tsv"', text)
+        self.assertIn("src/utils/verify_bucket_listing.py", text)
+        self.assertIn("--hold", text)
+        self.assertIn('scontrol release "${DOWNLOAD_JOB}"', text)
+        self.assertIn('LOCATORS="start1_side0_top start2_side0_top"', text)
+        self.assertIn('CUT_REVIEW_STATUS="unreviewed_pilot"', text)
+        self.assertIn('E2E_PILOT_QUALITY="low"', text)
+        self.assertIn('--dependency="aftercorr:${DOWNLOAD_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1A_JOB}"', text)
+        self.assertLess(
+            text.index(
+                'publish_submission_record "${SUBMISSION_PARTIAL}" '
+                '"submission.step00.tsv"'
+            ),
+            text.index('DOWNLOAD_JOB="$(sbatch --parsable'),
+        )
+        self.assertLess(
+            text.index('publish_submission_record "${PLAN_DIR}/submission.tsv"'),
+            text.index('scontrol release "${DOWNLOAD_JOB}"'),
+        )
 
-        inherited = subprocess.run(
-            ["bash", str(launcher)],
-            env={"PATH": "/usr/bin:/bin", "FORCE": "1"},
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(inherited.returncode, 2)
-        self.assertIn("inherited pipeline override: FORCE", inherited.stderr)
+    def test_launcher_rejects_arguments_and_environment_overrides(self) -> None:
+        repository = Path(__file__).parents[1]
+        for name in (
+            "submit_start01_start02_side0_top_e2e.sh",
+            "submit_start01_start02_side0_top_e2e_v2.sh",
+        ):
+            launcher = repository / "src/pipeline/slurm/resequence" / name
+            with self.subTest(launcher=name):
+                with_argument = subprocess.run(
+                    ["bash", str(launcher), "start3"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(with_argument.returncode, 2)
+                self.assertIn("zero-argument tracked launcher", with_argument.stderr)
+
+                inherited = subprocess.run(
+                    ["bash", str(launcher)],
+                    env={"PATH": "/usr/bin:/bin", "FORCE": "1"},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(inherited.returncode, 2)
+                self.assertIn("inherited pipeline override: FORCE", inherited.stderr)
 
 
 class EndToEndStage2GateTests(unittest.TestCase):

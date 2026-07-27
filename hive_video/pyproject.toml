@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Analysis tools and notebooks for Collective Logic Lab honey bee video data."
 requires-python = ">=3.12"
 dependencies = [
+    "certifi>=2026.4.22",
     "hf>=1.14.0",
     "ipykernel>=6.29",
     "jupyterlab>=4.2",

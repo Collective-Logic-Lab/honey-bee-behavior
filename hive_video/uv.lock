@@ -590,6 +590,7 @@ name = "hive-video"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "hf" },
     { name = "ipykernel" },
     { name = "jupyterlab" },
@@ -610,6 +611,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2026.4.22" },
     { name = "hf", specifier = ">=1.14.0" },
     { name = "ipykernel", specifier = ">=6.29" },
     { name = "jupyterlab", specifier = ">=4.2" },
