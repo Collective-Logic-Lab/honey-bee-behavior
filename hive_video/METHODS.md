@@ -50,14 +50,21 @@ the operator and all their transitions were judged clean:
 - `start47_20190731_184423_side0_top`
 - `start47_20190731_184423_side1_top`
 
-Saved endpoint JPEGs allowed an approximate retrospective check of 414 joins.
-Every approved successor ranked first. The smallest runner-up/approved distance
-ratio was $2.146$, the largest approved direct distance was $7.871$, and the
-smallest retained alternative distance was $13.170$. The original detector
-cutoff of $z=12$ would flag one approved Start 04 join, so the initial join-QC
-screen uses $z=15$ together with the independent rank and margin requirements.
-These measurements are JPEG-derived approximations; the production tool scores
-raw decoded frames and records its exact results.
+Saved endpoint JPEGs first allowed an approximate retrospective check of 414
+joins. Every approved successor ranked first. The smallest
+runner-up/approved distance ratio was $2.146$, the largest approved direct
+distance was $7.871$, and the smallest retained alternative distance was
+$13.170$. The original detector cutoff of $z=12$ would flag one approved
+Start 04 join, so the initial join-QC screen uses $z=15$ together with the
+independent rank and margin requirements.
+
+The subsequent production raw-frame pass scored 420 joins across the same
+three videos: 142, 141, and 137 respectively. All 420 selected successors
+ranked first and all three videos received `auto_pass`. The smallest exact
+runner-up margin was $2.155743$, the largest selected direct distance was
+$8.013889$, and the largest exact robust score was $z=12.961261$. Thus the
+screen agrees with the human clean labels on these controls, but the controls
+still contain no known failed joins.
 
 **Interpretation.** This procedure certifies that the reconstructed boundaries
 are visually smooth and unambiguous under the detector feature. It does not
@@ -76,8 +83,49 @@ a conservative shock/ambiguity screen over that result.
 - Treating the empirical score as a calibrated probability was rejected because
   the current labeled set contains clean videos but no naturally failed videos.
 
-**Revisit when.** Re-estimate the thresholds at the video level after raw-frame
-scores exist for these three controls and after naturally failed joins have
-been labeled. Track both the fraction of videos sent to review and all observed
-false automatic passes. A higher manual-review rate is acceptable; evidence of
-a false automatic pass requires tightening or replacing the rule.
+**Revisit when.** Re-estimate the thresholds at the video level after naturally
+failed joins have been labeled. Track both the fraction of videos sent to
+review and all observed false automatic passes. A higher manual-review rate is
+acceptable; evidence of a false automatic pass requires tightening or
+replacing the rule.
+
+## HV-R002: Start 01 / Start 02 unattended pipeline pilot
+
+**Status:** bounded pilot authorized, 2026-07-26
+
+**Decision.** Run one fixed end-to-end pilot on the top panel of side 0 for
+Start 01 and Start 02:
+
+- `start01__20190606_190340_side0_top.mp4`, 32,148,912,998 bytes,
+  MD5 `40f206a5c1cfb4367d0391038c4013e9`;
+- `start02__20190607_184457_side0_top.mp4`, 32,129,316,234 bytes,
+  MD5 `1f0c65e5ff5e4a4a91a3c053881e7fb7`.
+
+This pilot intentionally lets Stage 1a consume the unchanged Stage 1 proposal
+without human source-cut inspection. That condition is recorded as
+`cut_review_status=unreviewed_pilot`; neither logs nor published metadata may
+describe those cuts as inspected. Because join QC cannot detect a source cut
+that Stage 1 missed inside a segment, an automatic pass remains a pilot result
+and not a human-validated inventory result.
+
+Every Stage 1a outcome is published under the isolated prefix
+`resequenced/pilots/start01_start02_side0_top_v1/`. A
+`manual_review_required` video publishes its compact reports and flagged-join
+roll, then stops successfully without booking Stage 2. An `auto_pass` video
+continues through archival reassembly and verified upload, followed by the
+selected maximum-compression `low` derivative (H.264 CRF 28). Stage 2 tasks run
+one at a time because each requests 192 GB and performs heavy scratch I/O.
+Local work is likewise isolated under
+`artifacts/resequence_pilots/start01_start02_side0_top_v1/`; a bound root marker
+prevents a later generic compression or upload command from treating these
+unreviewed outputs as ordinary validated work.
+
+**Interpretation.** The two-video run is an integration and yield probe, not a
+threshold estimate. The operator's prior expectation is that the present
+pipeline will clear more than half but fewer than 80 percent of the inventory
+without intervention; this pilot can reveal failure modes but is too small to
+estimate that rate.
+
+**Revisit when.** Inspect both filed Stage 1a outcomes and every produced final
+video. Promote nothing from the pilot prefix into validated inventory until
+the source-cut limitation and any naturally flagged joins have been reviewed.

@@ -42,9 +42,89 @@ cd "${HIVE_VIDEO_ROOT}"
 # scratch venv so array tasks do not concurrently mutate the shared checkout.
 unset VIRTUAL_ENV
 
+hv_require_expected_revision() {
+  if [ -z "${E2E_EXPECTED_GIT_REVISION:-}" ]; then
+    return 0
+  fi
+  if ! printf '%s\n' "${E2E_EXPECTED_GIT_REVISION}" | \
+      grep -Eq '^[0-9a-f]{40}$'; then
+    echo "Invalid E2E_EXPECTED_GIT_REVISION: ${E2E_EXPECTED_GIT_REVISION}" >&2
+    exit 4
+  fi
+  local actual_revision
+  actual_revision="$(git rev-parse HEAD)"
+  if [ "${actual_revision}" != "${E2E_EXPECTED_GIT_REVISION}" ]; then
+    echo "Checkout revision changed after pilot submission." >&2
+    echo "  expected ${E2E_EXPECTED_GIT_REVISION}" >&2
+    echo "  observed ${actual_revision}" >&2
+    exit 4
+  fi
+  if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+    echo "Checkout became dirty after pilot submission; refusing mixed-revision work." >&2
+    git status --short >&2
+    exit 4
+  fi
+}
+
+hv_require_pilot_context_if_set() {
+  if [ -z "${E2E_PILOT_ID:-}" ]; then
+    return 0
+  fi
+  local expected_id="start01_start02_side0_top_v1"
+  local expected_prefix="${HF_BUCKET}/resequenced/pilots/${expected_id}"
+  local expected_root="${SCRATCH_ROOT}/artifacts/resequence_pilots/${expected_id}"
+  if [ "${E2E_PILOT_ID}" != "${expected_id}" ]; then
+    echo "Unexpected E2E_PILOT_ID: ${E2E_PILOT_ID}" >&2
+    exit 4
+  fi
+  if [ "${HF_RESEQ_PREFIX}" != "${expected_prefix}" ]; then
+    echo "Pilot isolation failure: HF_RESEQ_PREFIX is not the tracked pilot prefix." >&2
+    echo "  expected ${expected_prefix}" >&2
+    echo "  observed ${HF_RESEQ_PREFIX}" >&2
+    exit 4
+  fi
+  if [ "${RESEQ_ROOT}" != "${expected_root}" ]; then
+    echo "Pilot isolation failure: RESEQ_ROOT is not the tracked pilot root." >&2
+    echo "  expected ${expected_root}" >&2
+    echo "  observed ${RESEQ_ROOT}" >&2
+    exit 4
+  fi
+  if [ -z "${E2E_EXPECTED_GIT_REVISION:-}" ]; then
+    echo "The pilot context is missing E2E_EXPECTED_GIT_REVISION." >&2
+    exit 4
+  fi
+}
+
+hv_require_pilot_root_for_path() {
+  local path="$1"
+  local marker=""
+  if [ -f "${path}/.unreviewed_pilot_root" ]; then
+    marker="${path}/.unreviewed_pilot_root"
+  elif [ -f "$(dirname "${path}")/.unreviewed_pilot_root" ]; then
+    marker="$(dirname "${path}")/.unreviewed_pilot_root"
+  else
+    return 0
+  fi
+  if [ -z "${E2E_PILOT_ID:-}" ]; then
+    echo "Unreviewed pilot artifacts require their tracked pilot context: ${path}" >&2
+    exit 4
+  fi
+  hv_require_pilot_context_if_set
+  local expected_marker="v1|pilot_id=${E2E_PILOT_ID}"
+  expected_marker="${expected_marker}|git_revision=${E2E_EXPECTED_GIT_REVISION}"
+  expected_marker="${expected_marker}|hf_prefix=${HF_RESEQ_PREFIX}"
+  if [ "$(cat "${marker}")" != "${expected_marker}" ]; then
+    echo "Pilot root marker does not match the active pilot context: ${marker}" >&2
+    exit 4
+  fi
+}
+
 # Reconcile the scratch uv environment under a directory lock so concurrent
 # array tasks do not race each other into a half-written venv.
 hv_sync_env() {
+  hv_require_pilot_context_if_set
+  hv_require_expected_revision
+  hv_require_pilot_root_for_path "${RESEQ_ROOT}"
   mkdir -p "${SCRATCH_ROOT}/venvs" "${UV_CACHE_DIR}" "${DOWNLOAD_DIR}" "${RESEQ_ROOT}"
 
   local lock_dir="${UV_PROJECT_ENVIRONMENT}.lock"
@@ -135,6 +215,31 @@ hv_require_file() {
     echo "$2" >&2
     exit 4
   fi
+}
+
+# Read the source-cut review status bound into a Stage 1a completion marker.
+# Later rendering and upload jobs use this rather than trusting an inherited
+# environment variable that could disagree with the artifacts on disk.
+hv_stage1a_cut_review_status() {
+  local marker="$1"
+  hv_require_file "${marker}" "The Stage 1a completion marker is missing."
+  local contents
+  contents="$(cat "${marker}")"
+  case "${contents}" in
+    *"|cut_review_status=edited_verified|"*)
+      printf '%s\n' "edited_verified"
+      ;;
+    *"|cut_review_status=inspected|"*)
+      printf '%s\n' "inspected"
+      ;;
+    *"|cut_review_status=unreviewed_pilot|"*)
+      printf '%s\n' "unreviewed_pilot"
+      ;;
+    *)
+      echo "Stage 1a marker has no recognized cut-review status: ${marker}" >&2
+      exit 4
+      ;;
+  esac
 }
 
 # Return success when a step must run. A marker is reusable only when its

@@ -13,6 +13,10 @@ path from a single locator. Source cuts are inspected once; segment joins are
 sent to a human only when automatic QC flags them:
 
 ```bash
+# Fixed unattended Start 01 / Start 02 integration pilot:
+bash src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e.sh
+
+# Ordinary inspected production path:
 sbatch src/pipeline/slurm/resequence/download_raw_array.sh       # fetch raw video from Edmond
 sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh    # time the bounded full path
 sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and cut proposal
@@ -47,6 +51,12 @@ after a wall-clock kill. Each remote video folder carries
 `CURRENT_ARTIFACTS.json`; the upload preserves older bucket objects for audit,
 but publishes the manifest only after payload verification, and only its listed
 files belong to the current validated run.
+
+The fixed Start 01 / Start 02 pilot is intentionally different: it marks the
+unchanged source-cut proposals as `unreviewed_pilot`, files every Stage 1a
+outcome under a separate pilot prefix, and only lets auto-cleared videos
+continue. Its outputs are integration evidence rather than validated
+inventory.
 
 Compression is intentionally separate from resequencing: it creates a smaller
 H.264 sharing derivative while retaining the full-fidelity resequenced MP4.

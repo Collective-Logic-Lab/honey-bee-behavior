@@ -12,6 +12,10 @@ __pycache__/
 # OS/editor noise
 .DS_Store
 
+# Slurm opens these scheduler logs before a worker can verify its Git revision.
+slurm.*.out
+slurm.*.err
+
 # Large generated pipeline outputs.
 #
 # Ignore raw source data by default. Keep only the named small seed sample.

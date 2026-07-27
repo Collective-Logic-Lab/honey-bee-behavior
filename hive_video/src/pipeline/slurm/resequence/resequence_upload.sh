@@ -44,6 +44,7 @@ hv_sync_env
 
 WORK_DIR="${HV_UPLOAD_WORK_DIR}"
 KEY="${HV_UPLOAD_KEY}"
+hv_require_pilot_root_for_path "${WORK_DIR}"
 FINAL_VIDEO="${WORK_DIR}/output/reseq_${KEY}.mp4"
 FINAL_MAPPING="${WORK_DIR}/output/reseq_${KEY}.frame_mapping.csv"
 FINAL_METADATA="${WORK_DIR}/output/reseq_${KEY}.metadata.json"
@@ -90,10 +91,8 @@ hv_require_file "${REASSEMBLE_DONE}" "Stage 2 completion manifest is missing for
 
 if [ -f "${VERIFIED_CUTS}" ]; then
   CUTS="${VERIFIED_CUTS}"
-  CUT_REVIEW_LINE="Source cuts use the manually edited cut_review.verified.csv table."
 else
   CUTS="${PROPOSED_CUTS}"
-  CUT_REVIEW_LINE="Source cuts use the inspected, unchanged cut_review.proposed.csv table."
 fi
 CUTS_NAME="$(basename "${CUTS}")"
 
@@ -105,12 +104,37 @@ if ! grep -Fq "|${AUTO_QC_OUTPUT_SIGNATURE}" "${AUTO_QC_DONE}"; then
 fi
 
 CUTS_FINGERPRINT="$(hv_file_fingerprint "${CUTS}")"
-if ! grep -Fq \
-    "v2|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}" \
-    "${STAGE1A_DONE}"; then
+CUT_REVIEW_STATUS="$(hv_stage1a_cut_review_status "${STAGE1A_DONE}")"
+if [ "${CUT_REVIEW_STATUS}" = "unreviewed_pilot" ]; then
+  if [ -z "${E2E_PILOT_ID:-}" ] || [ -z "${E2E_EXPECTED_GIT_REVISION:-}" ]; then
+    echo "Unreviewed cuts may only upload inside the tracked pilot context." >&2
+    exit 4
+  fi
+  hv_require_pilot_context_if_set
+  hv_require_expected_revision
+  if ! grep -Fq \
+      "|git_revision=${E2E_EXPECTED_GIT_REVISION}|" "${STAGE1A_DONE}"; then
+    echo "Stage 1a marker does not match the tracked pilot revision." >&2
+    exit 4
+  fi
+fi
+STAGE1A_CUT_PREFIX="v3|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}"
+STAGE1A_CUT_PREFIX="${STAGE1A_CUT_PREFIX}|cut_review_status=${CUT_REVIEW_STATUS}|"
+if ! grep -Fq "${STAGE1A_CUT_PREFIX}" "${STAGE1A_DONE}"; then
   echo "Current cut-review inputs do not match the completed Stage 1a run." >&2
   exit 4
 fi
+case "${CUT_REVIEW_STATUS}" in
+  edited_verified)
+    CUT_REVIEW_LINE="Source cuts use the manually edited cut_review.verified.csv table."
+    ;;
+  inspected)
+    CUT_REVIEW_LINE="Source cuts use the inspected, unchanged cut_review.proposed.csv table."
+    ;;
+  unreviewed_pilot)
+    CUT_REVIEW_LINE="Source cuts use an unreviewed Stage 1 proposal from a bounded pipeline pilot."
+    ;;
+esac
 AUTO_QC_FINGERPRINT="$(hv_file_fingerprint "${AUTO_QC_SUMMARY}")"
 if ! grep -Fq "|auto_qc_report=${AUTO_QC_FINGERPRINT}|" "${STAGE1A_DONE}"; then
   echo "Current auto-QC report does not match the completed Stage 1a run." >&2

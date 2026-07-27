@@ -69,10 +69,25 @@ hv_require_file "${PROPOSED_CUTS}" "Stage 1 cut proposal is missing; rerun reseq
 hv_require_file "${DETECT_METADATA}" "Stage 1 detector metadata is missing; rerun resequence_stage1_array.sh."
 if [ -f "${VERIFIED_CUTS}" ]; then
   CUTS="${VERIFIED_CUTS}"
+  RESOLVED_CUT_REVIEW_STATUS="edited_verified"
   echo "Using edited cut review: ${CUTS}"
 else
   CUTS="${PROPOSED_CUTS}"
-  echo "Using manually inspected cut proposal without edits: ${CUTS}"
+  case "${CUT_REVIEW_STATUS:-inspected}" in
+    inspected)
+      RESOLVED_CUT_REVIEW_STATUS="inspected"
+      echo "Using manually inspected cut proposal without edits: ${CUTS}"
+      ;;
+    unreviewed_pilot)
+      RESOLVED_CUT_REVIEW_STATUS="unreviewed_pilot"
+      echo "Using unreviewed Stage 1 proposal for a bounded pipeline pilot: ${CUTS}"
+      ;;
+    *)
+      echo "CUT_REVIEW_STATUS must be inspected or unreviewed_pilot; got" \
+        "${CUT_REVIEW_STATUS}" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 mkdir -p "${HV_SEG_DIR}" "${HV_ORDER_DIR}" "${HV_REVIEW_DIR}"
@@ -239,7 +254,10 @@ fi
 
 AUTO_QC_FINGERPRINT="$(hv_file_fingerprint "${AUTO_QC_SUMMARY}")"
 AUTO_QC_BUNDLE_FINGERPRINT="$(hv_file_fingerprint "${AUTO_QC_DONE}")"
-STAGE1A_SIGNATURE="v2|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}"
+STAGE1A_GIT_REVISION="$(git rev-parse HEAD)"
+STAGE1A_SIGNATURE="v3|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}"
+STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|cut_review_status=${RESOLVED_CUT_REVIEW_STATUS}"
+STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|git_revision=${STAGE1A_GIT_REVISION}"
 STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|segments=${SEGMENTS_SIGNATURE}"
 STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|order=${ORDER_SIGNATURE}"
 STAGE1A_SIGNATURE="${STAGE1A_SIGNATURE}|auto_qc_report=${AUTO_QC_FINGERPRINT}"
@@ -253,6 +271,7 @@ Stage 1a complete for ${RESEQ_KEY}.
 
   segments         : ${SEGMENTS}
   greedy order     : ${GREEDY_ORDER}
+  cut review       : ${RESOLVED_CUT_REVIEW_STATUS}
   auto-QC scores   : ${AUTO_QC_SCORES}
   auto-QC summary  : ${AUTO_QC_SUMMARY}
   auto-QC decision : ${AUTO_QC_DECISION}

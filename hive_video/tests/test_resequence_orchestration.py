@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -1173,6 +1174,118 @@ class CurrentArtifactsManifestTests(unittest.TestCase):
 
 
 class CompletionMarkerTests(unittest.TestCase):
+    def test_unreviewed_pilot_root_requires_bound_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temporary = Path(tmpdir)
+            scratch = temporary / "scratch"
+            pilot_id = "start01_start02_side0_top_v1"
+            pilot_root = scratch / "artifacts/resequence_pilots" / pilot_id
+            pilot_root.mkdir(parents=True)
+            revision = "0123456789abcdef0123456789abcdef01234567"
+            bucket = "hf://buckets/test/honey-bee"
+            prefix = f"{bucket}/resequenced/pilots/{pilot_id}"
+            (pilot_root / ".unreviewed_pilot_root").write_text(
+                f"v1|pilot_id={pilot_id}|git_revision={revision}|"
+                f"hf_prefix={prefix}\n"
+            )
+            repository = Path(__file__).parents[1]
+            script = r"""
+set -eu
+export HIVE_VIDEO_ROOT="$1"
+export SCRATCH_ROOT="$2"
+export RESEQ_ROOT="$3"
+export HF_BUCKET="$4"
+export HF_RESEQ_PREFIX="$5"
+export E2E_PILOT_ID="$6"
+export E2E_EXPECTED_GIT_REVISION="$7"
+source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
+hv_require_pilot_context_if_set
+hv_require_pilot_root_for_path "${RESEQ_ROOT}"
+"""
+            command = [
+                "bash",
+                "-c",
+                script,
+                "bash",
+                str(repository),
+                str(scratch),
+                str(pilot_root),
+                bucket,
+                prefix,
+                pilot_id,
+                revision,
+            ]
+            subprocess.run(command, check=True, capture_output=True, text=True)
+
+            unbound_script = script.replace(
+                'export E2E_PILOT_ID="$6"',
+                "unset E2E_PILOT_ID",
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    unbound_script,
+                    *command[3:],
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("require their tracked pilot context", result.stderr)
+
+    def test_stage1a_cut_review_status_is_bound_to_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repository = Path(__file__).parents[1]
+            script = r"""
+set -eu
+export HIVE_VIDEO_ROOT="$1"
+source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
+hv_stage1a_cut_review_status "$2"
+"""
+            for expected in (
+                "edited_verified",
+                "inspected",
+                "unreviewed_pilot",
+            ):
+                marker = root / f"{expected}.complete"
+                marker.write_text(
+                    f"v3|cuts_file=cuts.csv|cuts=1:2|"
+                    f"cut_review_status={expected}|segments=fixture\n"
+                )
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        script,
+                        "bash",
+                        str(repository),
+                        str(marker),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.stdout.strip(), expected)
+
+            invalid = root / "invalid.complete"
+            invalid.write_text("v2|cuts_file=cuts.csv|cuts=1:2\n")
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    script,
+                    "bash",
+                    str(repository),
+                    str(invalid),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("no recognized cut-review status", result.stderr)
+
     def test_generated_output_mutation_invalidates_completion_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1223,6 +1336,292 @@ fi
                 text=True,
             )
             self.assertIn("inputs changed; rerunning step", result.stdout)
+
+
+class EndToEndPilotLauncherTests(unittest.TestCase):
+    def test_launcher_fixes_inputs_dependencies_and_pilot_destination(self) -> None:
+        repository = Path(__file__).parents[1]
+        launcher = (
+            repository
+            / "src/pipeline/slurm/resequence/"
+            "submit_start01_start02_side0_top_e2e.sh"
+        )
+        text = launcher.read_text()
+        self.assertIn('LOCATORS="start1_side0_top start2_side0_top"', text)
+        self.assertIn('CUT_REVIEW_STATUS="unreviewed_pilot"', text)
+        self.assertIn('E2E_PILOT_QUALITY="low"', text)
+        self.assertIn('PILOT_ID="start01_start02_side0_top_v1"', text)
+        self.assertIn(
+            'RESEQ_ROOT="${SCRATCH_ROOT}/artifacts/resequence_pilots/'
+            '${TRACKED_PILOT_ID}"',
+            text,
+        )
+        self.assertIn('--dependency="aftercorr:${DOWNLOAD_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1A_JOB}"', text)
+        self.assertIn('--array="${ARRAY_RANGE}%1"', text)
+        self.assertIn("resequence_e2e_stage2_gate_array.sh", text)
+
+    def test_launcher_rejects_arguments_and_environment_overrides(self) -> None:
+        repository = Path(__file__).parents[1]
+        launcher = (
+            repository
+            / "src/pipeline/slurm/resequence/"
+            "submit_start01_start02_side0_top_e2e.sh"
+        )
+        with_argument = subprocess.run(
+            ["bash", str(launcher), "start3"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(with_argument.returncode, 2)
+        self.assertIn("zero-argument tracked launcher", with_argument.stderr)
+
+        inherited = subprocess.run(
+            ["bash", str(launcher)],
+            env={"PATH": "/usr/bin:/bin", "FORCE": "1"},
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(inherited.returncode, 2)
+        self.assertIn("inherited pipeline override: FORCE", inherited.stderr)
+
+
+class EndToEndStage2GateTests(unittest.TestCase):
+    def run_gate(
+        self,
+        root: Path,
+        decision: str,
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
+        repository = Path(__file__).parents[1]
+        script_dir = root / "src/pipeline/slurm/resequence"
+        script_dir.mkdir(parents=True)
+        gate = script_dir / "resequence_e2e_stage2_gate_array.sh"
+        gate.write_text(
+            (
+                repository
+                / "src/pipeline/slurm/resequence/"
+                "resequence_e2e_stage2_gate_array.sh"
+            ).read_text()
+        )
+
+        work = root / "work"
+        qc = work / "qc"
+        segments = work / "segments"
+        order = work / "order"
+        review = work / "review"
+        for directory in (qc, segments, order, review):
+            directory.mkdir(parents=True)
+        for path in (
+            work / "raw.mp4",
+            qc / "cut_review.proposed.csv",
+            qc / "metadata.json",
+            qc / "candidates.csv",
+            qc / "jump_events.csv",
+            segments / "segments.csv",
+            order / "ranked_edges.csv",
+            order / "greedy_order.csv",
+            review / "auto_qc.join_scores.csv",
+            review / "auto_qc.flagged_joins.csv",
+        ):
+            path.write_text("fixture\n")
+        (review / "auto_qc.summary.json").write_text(
+            json.dumps({"decision": decision}) + "\n"
+        )
+        (review / ".auto_qc.complete").write_text("inputs|outputs=bundle\n")
+        (review / ".stage1a.complete").write_text(
+            "v3|cuts_file=cut_review.proposed.csv|cuts=fp|"
+            "cut_review_status=unreviewed_pilot|"
+            "git_revision=0123456789abcdef0123456789abcdef01234567|"
+            "auto_qc_report=fp|auto_qc_bundle=fp|review=fixture\n"
+        )
+        if decision == "manual_review_required":
+            (review / "qc_roll_flagged_joins.mp4").write_text("video\n")
+            (review / "qc_roll_flagged_joins.captions.csv").write_text(
+                "caption\n"
+            )
+
+        common = script_dir / "common.sh"
+        common.write_text(
+            r"""
+set -eu
+HF_BUCKET="${HF_BUCKET}"
+HF_RESEQ_PREFIX="${HF_RESEQ_PREFIX}"
+hv_sync_env() { :; }
+hv_locator_for_task() { printf '%s\n' "${1%% *}"; }
+hv_resolve() {
+  RESEQ_KEY="start01_20190606_190340_side0_top"
+  RESEQ_PATH="${PILOT_FIXTURE_WORK}/raw.mp4"
+  HV_WORK_DIR="${PILOT_FIXTURE_WORK}"
+  HV_QC_DIR="${HV_WORK_DIR}/qc"
+  HV_SEG_DIR="${HV_WORK_DIR}/segments"
+  HV_ORDER_DIR="${HV_WORK_DIR}/order"
+  HV_REVIEW_DIR="${HV_WORK_DIR}/review"
+  HV_OUT_DIR="${HV_WORK_DIR}/output"
+}
+hv_require_file() {
+  if [ ! -f "$1" ]; then
+    echo "missing: $1" >&2
+    exit 4
+  fi
+}
+hv_stage1a_cut_review_status() {
+  case "$(cat "$1")" in
+    *"|cut_review_status=unreviewed_pilot|"*) printf '%s\n' unreviewed_pilot ;;
+    *"|cut_review_status=inspected|"*) printf '%s\n' inspected ;;
+    *) exit 4 ;;
+  esac
+}
+hv_file_bundle_fingerprint() { printf '%s\n' bundle; }
+hv_file_fingerprint() { printf '%s\n' fp; }
+"""
+        )
+        (script_dir / "resequence_stage2_array.sh").write_text(
+            '#!/bin/bash\nprintf "stage2\\n" >>"${PILOT_EVENT_LOG}"\n'
+        )
+        (script_dir / "compress_resequenced_array.sh").write_text(
+            "#!/bin/bash\nexit 0\n"
+        )
+
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        event_log = root / "events.log"
+        fake_uv = bin_dir / "uv"
+        fake_uv.write_text(
+            f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import sys
+
+args = sys.argv[1:]
+with open(os.environ["PILOT_EVENT_LOG"], "a") as handle:
+    handle.write("uv " + json.dumps(args) + "\\n")
+if len(args) >= 5 and args[0:3] == ["run", "--no-sync", "python"]:
+    code = args[4] if args[3] == "-c" else ""
+    if "json.load" in code and "decision" in code:
+        summary = pathlib.Path(args[-1])
+        print(json.loads(summary.read_text())["decision"])
+elif "hf" in args and "buckets" in args and "list" in args:
+    print("[]")
+elif "hf" in args and "auth" in args and "whoami" in args:
+    print("{{}}")
+"""
+        )
+        fake_uv.chmod(0o755)
+        fake_git = bin_dir / "git"
+        fake_git.write_text(
+            f"""#!{sys.executable}
+import sys
+if sys.argv[1:3] == ["rev-parse", "HEAD"]:
+    print("0123456789abcdef0123456789abcdef01234567")
+else:
+    raise SystemExit(2)
+"""
+        )
+        fake_git.chmod(0o755)
+        fake_sbatch = bin_dir / "sbatch"
+        fake_sbatch.write_text(
+            f"""#!{sys.executable}
+import json
+import os
+import sys
+with open(os.environ["PILOT_EVENT_LOG"], "a") as handle:
+    handle.write("sbatch " + json.dumps(sys.argv[1:]) + "\\n")
+print("92001;sol")
+"""
+        )
+        fake_sbatch.chmod(0o755)
+
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "PATH": f"{bin_dir}:{environment['PATH']}",
+                "HIVE_VIDEO_ROOT": str(root),
+                "SLURM_SUBMIT_DIR": str(root),
+                "PILOT_FIXTURE_WORK": str(work),
+                "PILOT_EVENT_LOG": str(event_log),
+                "LOCATORS": "start1_side0_top start2_side0_top",
+                "E2E_PILOT_ID": "start01_start02_side0_top_v1",
+                "E2E_PILOT_QUALITY": "low",
+                "E2E_EXPECTED_GIT_REVISION": (
+                    "0123456789abcdef0123456789abcdef01234567"
+                ),
+                "HF_BUCKET": "hf://buckets/test/honey-bee",
+                "HF_RESEQ_PREFIX": (
+                    "hf://buckets/test/honey-bee/resequenced/pilots/"
+                    "start01_start02_side0_top_v1"
+                ),
+                "HF_TOKEN": "test-only",
+                "SLURM_ARRAY_JOB_ID": "900",
+                "SLURM_ARRAY_TASK_ID": "0",
+                "SLURM_JOB_ID": "901",
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(gate)],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        events = event_log.read_text().splitlines()
+        return result, events, work
+
+    def test_manual_review_is_filed_and_stops_without_stage2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, events, work = self.run_gate(
+                Path(tmpdir),
+                "manual_review_required",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(any(event == "stage2" for event in events))
+            self.assertFalse(any(event.startswith("sbatch ") for event in events))
+            sync_index = next(
+                index
+                for index, event in enumerate(events)
+                if event.startswith("uv ") and '"sync"' in event
+            )
+            commit_index = next(
+                index
+                for index, event in enumerate(events)
+                if event.startswith("uv ")
+                and '"cp"' in event
+                and "CURRENT_STAGE1A.json" in event
+            )
+            self.assertLess(sync_index, commit_index)
+            staging = work / "e2e_pilot_stage1a_upload"
+            self.assertTrue((staging / "qc_roll_flagged_joins.mp4").is_file())
+            self.assertTrue(
+                (staging / "qc_roll_flagged_joins.captions.csv").is_file()
+            )
+            self.assertIn("No Stage 2 render", result.stdout)
+
+    def test_auto_pass_is_filed_before_stage2_and_compression(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, events, work = self.run_gate(Path(tmpdir), "auto_pass")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            stage2_index = events.index("stage2")
+            commit_index = next(
+                index
+                for index, event in enumerate(events)
+                if event.startswith("uv ")
+                and '"cp"' in event
+                and "CURRENT_STAGE1A.json" in event
+            )
+            sbatch_index = next(
+                index
+                for index, event in enumerate(events)
+                if event.startswith("sbatch ")
+            )
+            self.assertLess(commit_index, stage2_index)
+            self.assertLess(stage2_index, sbatch_index)
+            submission = events[sbatch_index]
+            self.assertIn('"--array=0-0"', submission)
+            self.assertIn('"--dependency=afterok:901"', submission)
+            self.assertIn("LOCATORS=start1_side0_top,QUALITY=low", submission)
+            staging = work / "e2e_pilot_stage1a_upload"
+            self.assertFalse((staging / "qc_roll_flagged_joins.mp4").exists())
 
 
 if __name__ == "__main__":

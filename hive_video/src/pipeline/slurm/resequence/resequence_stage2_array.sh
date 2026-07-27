@@ -93,7 +93,23 @@ if ! grep -Fq "|${AUTO_QC_OUTPUT_SIGNATURE}" "${AUTO_QC_DONE}"; then
 fi
 
 CUTS_FINGERPRINT="$(hv_file_fingerprint "${CUTS}")"
-if ! grep -Fq "v2|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}" "${STAGE1A_DONE}"; then
+CUT_REVIEW_STATUS="$(hv_stage1a_cut_review_status "${STAGE1A_DONE}")"
+if [ "${CUT_REVIEW_STATUS}" = "unreviewed_pilot" ]; then
+  if [ -z "${E2E_PILOT_ID:-}" ] || [ -z "${E2E_EXPECTED_GIT_REVISION:-}" ]; then
+    echo "Unreviewed cuts may only render inside the tracked pilot context." >&2
+    exit 4
+  fi
+  hv_require_pilot_context_if_set
+  hv_require_expected_revision
+  if ! grep -Fq \
+      "|git_revision=${E2E_EXPECTED_GIT_REVISION}|" "${STAGE1A_DONE}"; then
+    echo "Stage 1a marker does not match the tracked pilot revision." >&2
+    exit 4
+  fi
+fi
+STAGE1A_CUT_PREFIX="v3|cuts_file=$(basename "${CUTS}")|cuts=${CUTS_FINGERPRINT}"
+STAGE1A_CUT_PREFIX="${STAGE1A_CUT_PREFIX}|cut_review_status=${CUT_REVIEW_STATUS}|"
+if ! grep -Fq "${STAGE1A_CUT_PREFIX}" "${STAGE1A_DONE}"; then
   echo "Stage 1a was built from different cut-review inputs; rerun resequence_stage1a_review_array.sh." >&2
   exit 4
 fi

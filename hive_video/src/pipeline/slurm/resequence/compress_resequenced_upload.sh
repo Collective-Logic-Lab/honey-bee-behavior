@@ -38,6 +38,7 @@ hv_sync_env
 WORK_DIR="${HV_COMPRESSION_WORK_DIR}"
 KEY="${HV_COMPRESSION_KEY}"
 QUALITY="${HV_COMPRESSION_QUALITY}"
+hv_require_pilot_root_for_path "${WORK_DIR}"
 VIDEO="${WORK_DIR}/compressed/reseq_${KEY}.${QUALITY}.mp4"
 METADATA="${WORK_DIR}/compressed/reseq_${KEY}.${QUALITY}.compression.json"
 STAGING="${WORK_DIR}/compression_upload_${KEY}_${QUALITY}"
