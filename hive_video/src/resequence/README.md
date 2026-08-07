@@ -1,43 +1,61 @@
-## Resequence
+# Resequencing
 
 These scripts repair shuffled hive videos by detecting visual discontinuities,
 turning those discontinuities into source segments, ordering the segments, and
 rendering a captioned review video. They are written as command-line tools and
 are intended to be run from the `hive_video/` directory with `uv run python`.
 
-### Start here: the scripted pipeline
+## Quickstart
 
-On the cluster you should not be driving these tools one at a time. The wrappers
-in `src/pipeline/slurm/resequence/` run the whole sequence and resolve every
-path from a single locator. Source cuts are inspected once; segment joins are
-sent to a human only when automatic QC flags them:
+Run the cluster commands from the `hive_video/` checkout on Sol. The default
+arrays process the established Start 04 side 1 and Start 47 sides 0 and 1
+videos. Each `sbatch` below is a separate job: wait for it to succeed before
+submitting the next stage.
 
 ```bash
-# Fixed unattended Start 01 / Start 02 integration pilot:
-bash src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e_v2.sh
+cd ~/workspace/honey-bee-behavior/hive_video
 
-# Ordinary inspected production path:
-sbatch src/pipeline/slurm/resequence/download_raw_array.sh       # fetch raw video from Edmond
-sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh    # time the bounded full path
-sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh  # detection and cut proposal
+sbatch src/pipeline/slurm/resequence/download_raw_array.sh
+squeue -u pdressla --iterate=120
 
-# inspect qc/candidates.csv and qc/cut_review.proposed.csv
-# (save qc/cut_review.verified.csv only when you edit a cut)
+# After the downloads succeed:
+sbatch src/pipeline/slurm/resequence/resequence_stage1_array.sh
 
-sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh # order + auto-QC
-sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh  # final render, then upload
+# Inspect qc/candidates.csv, qc/jump_events.csv, and
+# qc/cut_review.proposed.csv. Create qc/cut_review.verified.csv only if
+# you change the proposed cuts. Then:
+sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh
 
-# Compare high/medium/low on the complete Start 04 side 1 QC roll and upload
-# only those small comparison files for remote inspection:
-sbatch src/pipeline/slurm/resequence/compress_qc_roll_smoke.sh
-
-# After choosing a profile, create a sharing copy of each final video:
-sbatch src/pipeline/slurm/resequence/compress_resequenced_smoke_test.sh
-sbatch src/pipeline/slurm/resequence/compress_resequenced_array.sh
-
-# One-time maximum-compression backfill for the three current and two prior videos:
-sbatch src/pipeline/slurm/resequence/compress_existing_low_backfill_array.sh
+# Read review/auto_qc.summary.json. If it says manual_review_required,
+# inspect review/qc_roll_flagged_joins.mp4 and record approval first.
+# When it says auto_pass, or the flagged roll has been approved:
+sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
+
+Stage 2 renders the full-fidelity MP4 and queues its dependent upload. From a
+clean checkout published at `origin/main`, use the fixed zero-argument launcher
+only to reproduce the recorded Start 01 / Start 02 integration pilot; it owns
+that pilot's dependencies, configuration, scratch prefix, and upload prefix:
+
+```bash
+bash src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e_v2.sh
+```
+
+## Where things live
+
+- `src/resequence/` contains reusable Python implementation and diagnostic
+  modules. These should remain runnable outside Slurm.
+- `src/pipeline/slurm/resequence/` contains all cluster orchestration for this
+  workflow: job arrays, smoke tests, upload and compression jobs, and versioned
+  parent launchers. Put additional resequencing Slurm scripts here.
+- `data/qc/resequence/reseq_<key>/` contains selectively copied local review
+  artifacts, organized into `qc/`, `segments/`, `order/`, and `review/`.
+
+## Workflow details
+
+On the cluster, the wrappers in `src/pipeline/slurm/resequence/` run the whole
+sequence and resolve every path from a single locator. Source cuts are inspected
+once; segment joins are sent to a human only when automatic QC flags them.
 
 Stage 1 covers steps 1 and 2 below and prepares an editable cut table without
 writing hundreds of JPEGs. Stage 1a uses the inspected proposal directly, or
@@ -64,16 +82,27 @@ H.264 sharing derivative while retaining the full-fidelity resequenced MP4.
 The smoke wrapper renders `high`, `medium`, and `low` samples before the array
 creates and uploads only the chosen full-length profile.
 
+Optional smoke tests, compression passes, and the one-time five-video backfill
+are launched from the same directory:
+
+```bash
+sbatch src/pipeline/slurm/resequence/resequence_smoke_test.sh
+sbatch src/pipeline/slurm/resequence/compress_qc_roll_smoke.sh
+sbatch src/pipeline/slurm/resequence/compress_resequenced_smoke_test.sh
+sbatch src/pipeline/slurm/resequence/compress_resequenced_array.sh
+sbatch src/pipeline/slurm/resequence/compress_existing_low_backfill_array.sh
+```
+
 `src/pipeline/slurm/resequence/common.sh` holds the shared environment, the uv
 scratch-venv locking, and `hv_resolve`, which turns a locator such as
 `start47_side1_top` into the raw video path, the canonical key, and every work
-directory. The full walkthrough, including how to select other files, is in
-`hive_video/README.md`.
+directory. The full walkthrough, including how to select other files, is in the
+[project README](../../README.md).
 
 The rest of this document describes the underlying tools, which is what you
 want when diagnosing a bad join or running a step by hand.
 
-### The tools
+## Underlying tools
 
 The current pipeline is:
 
@@ -105,7 +134,7 @@ The current pipeline is:
    profiles. It validates resolution, frame rate, duration, and codec before
    atomically publishing the local derivative.
 
-### Diagnostics
+## Diagnostics
 
 The `diagnostics/` directory contains tools used to validate or review the
 pipeline rather than produce the final video directly.
@@ -128,7 +157,7 @@ pipeline rather than produce the final video directly.
   auto-QC report, flagged table, review MP4, and caption manifest, and rejects
   stale approvals after any of them change.
 
-### Safeword
+## Safeword
 
 Long-running, restartable scripts use `.safeword` in the current working
 directory. If the file contains `sea cucumber` or `seacucubmer`, processing
@@ -140,13 +169,23 @@ printf 'sea cucumber\n' > .safeword
 
 Remove `.safeword` and rerun the same command to resume.
 
-### Outputs
+## Outputs
 
-Recommended output locations from `hive_video/`:
+Production runs use one work root per source video on Sol:
 
-- `data/qc/` for discontinuity candidates, event summaries, join reviews, and
-  other inspection artifacts.
-- `data/artifacts/segments/` for segment CSVs and segment metadata.
-- `data/experiments/` for rendered review videos and full reassembled videos.
+```text
+/scratch/pdressla/honey-bee/artifacts/resequence/reseq_<key>/
+|-- qc/        detector results and cut-review tables
+|-- segments/  source segment table and metadata
+|-- order/     ranked edges and selected segment order
+|-- review/    automatic join-QC reports and any flagged-join roll
+`-- output/    full-fidelity render, mappings, metadata, and derivatives
+```
 
-Large videos and generated part files should stay out of git.
+The cleaned local review copies in `data/qc/resequence/` mirror the first four
+directories. A `qc/candidates/` JPEG directory may still appear in older runs;
+current Stage 1 creates those images only when `--write-candidate-frames` is
+explicitly enabled.
+
+Large videos, compressed derivatives, and generated part files should stay out
+of git.
