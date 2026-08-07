@@ -86,6 +86,9 @@ hv_require_pilot_context_if_set() {
     start01_start02_side0_top_v1|start01_start02_side0_top_v2)
       expected_id="${E2E_PILOT_ID}"
       ;;
+    start03_start38_both_sides_top_v1)
+      expected_id="${E2E_PILOT_ID}"
+      ;;
     *)
       echo "Unexpected E2E_PILOT_ID: ${E2E_PILOT_ID}" >&2
       exit 4

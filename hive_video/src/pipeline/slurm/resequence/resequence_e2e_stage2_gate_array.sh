@@ -1,10 +1,9 @@
 #!/bin/bash
 # File every Stage 1a outcome, then render and compress only cleared videos.
 #
-# This is the Stage 2 worker for the tracked Start 01 / Start 02 unattended
-# pilot. Submit it through the current tracked, versioned Start 01 / Start 02
-# parent launcher so its locators, provenance mode, dependencies, and private
-# pilot destination are fixed together.
+# This is the Stage 2 worker for tracked unattended resequencing pilots. Submit
+# it only through a versioned parent launcher so the locators, provenance mode,
+# dependencies, and private pilot destination are fixed together.
 #
 # A manual_review_required result is a successful scientific outcome here:
 # its compact report bundle is published and the task stops without requesting
@@ -13,7 +12,7 @@
 # selected compressed derivative on a separate dependent allocation.
 
 #SBATCH --job-name=bees-e2e-stage2
-#SBATCH --array=0-1%1
+#SBATCH --array=0-3%1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=192GB
 #SBATCH -t 48:00:00
@@ -35,8 +34,21 @@ source "${SCRIPT_DIR}/common.sh"
 : "${E2E_PILOT_QUALITY:?E2E_PILOT_QUALITY must be supplied by the tracked pilot launcher.}"
 : "${E2E_EXPECTED_GIT_REVISION:?The tracked pilot revision is required.}"
 
-if [ "${LOCATORS}" != "start1_side0_top start2_side0_top" ]; then
+case "${E2E_PILOT_ID}" in
+  start01_start02_side0_top_v1|start01_start02_side0_top_v2)
+    EXPECTED_LOCATORS="start1_side0_top start2_side0_top"
+    ;;
+  start03_start38_both_sides_top_v1)
+    EXPECTED_LOCATORS="start3_side0_top start3_side1_top start38_side0_top start38_side1_top"
+    ;;
+  *)
+    echo "Unexpected E2E_PILOT_ID: ${E2E_PILOT_ID}" >&2
+    exit 2
+    ;;
+esac
+if [ "${LOCATORS}" != "${EXPECTED_LOCATORS}" ]; then
   echo "Unexpected pilot locators: ${LOCATORS}" >&2
+  echo "Expected for ${E2E_PILOT_ID}: ${EXPECTED_LOCATORS}" >&2
   exit 2
 fi
 if [ "${E2E_PILOT_QUALITY}" != "low" ]; then

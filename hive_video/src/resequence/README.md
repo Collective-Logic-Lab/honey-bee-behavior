@@ -32,10 +32,23 @@ sbatch src/pipeline/slurm/resequence/resequence_stage1a_review_array.sh
 sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
 
-Stage 2 renders the full-fidelity MP4 and queues its dependent upload. From a
-clean checkout published at `origin/main`, use the fixed zero-argument launcher
-only to reproduce the recorded Start 01 / Start 02 integration pilot; it owns
-that pilot's dependencies, configuration, scratch prefix, and upload prefix:
+Stage 2 renders the full-fidelity MP4 and queues its dependent upload. The
+current bounded unattended batch covers both top-panel sides of Start 03
+(`20190608_181426`) and Start 38 (`20190722_200917`):
+
+```bash
+bash src/pipeline/slurm/resequence/submit_start03_start38_both_sides_top_e2e_v1.sh
+```
+
+This launcher requires a clean checkout published at `origin/main`, fixes all
+four locators and dependencies, and uses isolated pilot scratch and upload
+prefixes. Because it intentionally crosses the source-cut checkpoint without
+human inspection, its outputs remain pilot evidence: Auto-QC-cleared videos
+continue through rendering and maximum compression, while flagged videos file
+their compact review bundle and stop cleanly.
+
+The earlier Start 01 / Start 02 integration pilot remains reproducible with its
+own fixed zero-argument launcher:
 
 ```bash
 bash src/pipeline/slurm/resequence/submit_start01_start02_side0_top_e2e_v2.sh

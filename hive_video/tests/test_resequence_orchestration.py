@@ -1457,11 +1457,70 @@ class EndToEndPilotLauncherTests(unittest.TestCase):
             text.index('scontrol release "${DOWNLOAD_JOB}"'),
         )
 
+    def test_start03_start38_launcher_fixes_four_video_pilot(self) -> None:
+        repository = Path(__file__).parents[1]
+        script_dir = repository / "src/pipeline/slurm/resequence"
+        launcher = (
+            script_dir / "submit_start03_start38_both_sides_top_e2e_v1.sh"
+        )
+        text = launcher.read_text()
+        self.assertIn(
+            'TRACKED_PILOT_ID="start03_start38_both_sides_top_v1"', text
+        )
+        self.assertIn(
+            'LOCATORS="start3_side0_top start3_side1_top '
+            'start38_side0_top start38_side1_top"',
+            text,
+        )
+        for key in (
+            "start03_20190608_181426_side0_top",
+            "start03_20190608_181426_side1_top",
+            "start38_20190722_200917_side0_top",
+            "start38_20190722_200917_side1_top",
+        ):
+            self.assertIn(key, text)
+        self.assertIn('ARRAY_RANGE="0-3"', text)
+        self.assertIn('CUT_REVIEW_STATUS="unreviewed_pilot"', text)
+        self.assertIn('E2E_PILOT_QUALITY="low"', text)
+        self.assertIn('SOL_CA_BUNDLE="/etc/pki/tls/certs/ca-bundle.crt"', text)
+        self.assertIn("--probe-only", text)
+        self.assertIn("--refresh-manifest", text)
+        self.assertIn(
+            'RESEQ_ROOT="${SCRATCH_ROOT}/artifacts/resequence_pilots/'
+            '${TRACKED_PILOT_ID}"',
+            text,
+        )
+        self.assertIn(
+            'HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced/pilots/${PILOT_ID}"',
+            text,
+        )
+        self.assertIn("submission.step00.tsv", text)
+        self.assertIn("submission.step04.tsv", text)
+        self.assertIn("src/utils/verify_bucket_listing.py", text)
+        self.assertIn("--hold", text)
+        self.assertIn('scontrol release "${DOWNLOAD_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${DOWNLOAD_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1A_JOB}"', text)
+        self.assertIn('--array="${ARRAY_RANGE}%1"', text)
+        self.assertNotIn("PRIOR_PILOT_ID", text)
+
+        common_text = (script_dir / "common.sh").read_text()
+        gate_text = (script_dir / "resequence_e2e_stage2_gate_array.sh").read_text()
+        self.assertIn("start03_start38_both_sides_top_v1", common_text)
+        self.assertIn("start03_start38_both_sides_top_v1", gate_text)
+        self.assertIn(
+            'EXPECTED_LOCATORS="start3_side0_top start3_side1_top '
+            'start38_side0_top start38_side1_top"',
+            gate_text,
+        )
+
     def test_launcher_rejects_arguments_and_environment_overrides(self) -> None:
         repository = Path(__file__).parents[1]
         for name in (
             "submit_start01_start02_side0_top_e2e.sh",
             "submit_start01_start02_side0_top_e2e_v2.sh",
+            "submit_start03_start38_both_sides_top_e2e_v1.sh",
         ):
             launcher = repository / "src/pipeline/slurm/resequence" / name
             with self.subTest(launcher=name):
@@ -1488,6 +1547,9 @@ class EndToEndStage2GateTests(unittest.TestCase):
         self,
         root: Path,
         decision: str,
+        *,
+        pilot_id: str = "start01_start02_side0_top_v1",
+        locators: str = "start1_side0_top start2_side0_top",
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         repository = Path(__file__).parents[1]
         script_dir = root / "src/pipeline/slurm/resequence"
@@ -1637,8 +1699,8 @@ print("92001;sol")
                 "SLURM_SUBMIT_DIR": str(root),
                 "PILOT_FIXTURE_WORK": str(work),
                 "PILOT_EVENT_LOG": str(event_log),
-                "LOCATORS": "start1_side0_top start2_side0_top",
-                "E2E_PILOT_ID": "start01_start02_side0_top_v1",
+                "LOCATORS": locators,
+                "E2E_PILOT_ID": pilot_id,
                 "E2E_PILOT_QUALITY": "low",
                 "E2E_EXPECTED_GIT_REVISION": (
                     "0123456789abcdef0123456789abcdef01234567"
@@ -1646,7 +1708,7 @@ print("92001;sol")
                 "HF_BUCKET": "hf://buckets/test/honey-bee",
                 "HF_RESEQ_PREFIX": (
                     "hf://buckets/test/honey-bee/resequenced/pilots/"
-                    "start01_start02_side0_top_v1"
+                    f"{pilot_id}"
                 ),
                 "HF_TOKEN": "test-only",
                 "SLURM_ARRAY_JOB_ID": "900",
@@ -1663,6 +1725,20 @@ print("92001;sol")
         )
         events = event_log.read_text().splitlines()
         return result, events, work
+
+    def test_start03_start38_pilot_mapping_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result, events, _work = self.run_gate(
+                Path(tmpdir),
+                "manual_review_required",
+                pilot_id="start03_start38_both_sides_top_v1",
+                locators=(
+                    "start3_side0_top start3_side1_top "
+                    "start38_side0_top start38_side1_top"
+                ),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(any(event == "stage2" for event in events))
 
     def test_manual_review_is_filed_and_stops_without_stage2(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

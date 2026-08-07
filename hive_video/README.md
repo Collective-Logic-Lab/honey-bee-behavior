@@ -63,7 +63,29 @@ minutes. Resequencing puts them back in order. End to end that is four `sbatch`
 submissions from `hive_video/`, with source-cut inspection and manual join
 review only when the automatic join diagnostic flags a video.
 
-#### Bounded unattended Start 01 / Start 02 pilot
+#### Bounded unattended Start 03 / Start 38 pilot
+
+The current four-video integration batch fixes both top-panel sides of Start 03
+and Start 38, then runs the dependency-linked download, Stage 1, Stage 1a,
+outcome filing, Stage 2, and maximum-compression paths:
+
+```bash
+bash src/pipeline/slurm/resequence/submit_start03_start38_both_sides_top_e2e_v1.sh
+```
+
+The archive resolves those starts to `20190608_181426` and `20190722_200917`.
+The launcher takes no arguments, verifies the four exact files and their real
+media TLS paths, and records the complete submission before releasing its held
+download array. Scratch work lives under
+`artifacts/resequence_pilots/start03_start38_both_sides_top_v1/`, and remote
+artifacts live under
+`resequenced/pilots/start03_start38_both_sides_top_v1/`. Source-cut proposals
+are explicitly marked `unreviewed_pilot`; flagged videos stop after filing the
+compact review bundle, while Auto-QC-cleared videos continue to an archival MP4
+and a `low` (CRF 28, maximum-compression) sharing derivative. These artifacts
+do not replace validated inventory.
+
+#### Recorded Start 01 / Start 02 pilot
 
 The tracked two-video integration pilot fixes the inputs to Start 01 and Start
 02, side 0, top panel, then submits the dependency-linked download, Stage 1,

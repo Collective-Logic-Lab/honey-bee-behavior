@@ -189,3 +189,45 @@ the distinction between failed and corrected attempts.
 **Revisit when.** Revisit the CA selection only if Sol changes its system trust
 path or the verified media probe fails. Revisit the scientific plan under the
 same conditions recorded in HV-R002 after v2 produces filed outcomes.
+
+## HV-R004: Start 03 / Start 38 both-side unattended pilot
+
+**Status:** tracked bounded pilot prepared, not yet launched, 2026-08-07
+
+**Decision.** Run a four-video end-to-end pilot on both top-panel sides of
+Start 03 and Start 38:
+
+- `start03__20190608_181426_side0_top.mp4`, 32,135,449,433 bytes,
+  MD5 `90944e39f3c88989c867d8ecd3037a69`;
+- `start03__20190608_181426_side1_top.mp4`, 32,148,250,648 bytes,
+  MD5 `38920d37de18b08ddcb8dae196b800dc`;
+- `start38__20190722_200917_side0_top.mp4`, 29,847,838,843 bytes,
+  MD5 `94c5dfd1b140be69b933db3806cb8272`;
+- `start38__20190722_200917_side1_top.mp4`, 29,857,909,536 bytes,
+  MD5 `c9909adb163a6942732ad9539e0263be`.
+
+The fixed launcher is
+`submit_start03_start38_both_sides_top_e2e_v1.sh`. It refreshes the archive
+manifest, verifies each resolved canonical key, and probes all four real media
+redirects with TLS verification before submitting work. The corresponding
+download, Stage 1, and Stage 1a array elements use `aftercorr` dependencies.
+The Stage 2 gate is limited to one 192 GB task at a time.
+
+As in HV-R002, Stage 1 proposals are deliberately labeled
+`cut_review_status=unreviewed_pilot`. Automatic join QC cannot establish that
+Stage 1 found every source cut, so an `auto_pass` remains pilot evidence rather
+than a validated inventory result. Every Stage 1a outcome is filed; flagged
+videos stop with a compact review bundle, while cleared videos continue to the
+archival render and `low` (CRF 28, maximum-compression) derivative.
+
+Both scratch and Hugging Face outputs are isolated under
+`start03_start38_both_sides_top_v1`. This keeps the new Start 03 side 0 run
+separate from the older prior-batch archival result. The shared raw-download
+directory remains safe because completed files are size- and MD5-verified.
+The held download array is released only after the incremental submission
+record has been published and verified under the private pilot prefix.
+
+**Revisit when.** Inspect the filed source-cut tables and any flagged join
+rolls before promoting results into validated inventory. Record the four-video
+automatic-clear rate as additional yield evidence, not as a calibrated
+population success estimate.
