@@ -41,7 +41,7 @@ for variable in \
   SCALE_WIDTH SEGMENT_CHUNK_SIZE EDGE_RANK_LIMIT \
   QUALITY COMPRESS_PRESET CUT_REVIEW_STATUS \
   E2E_PILOT_ID E2E_PILOT_QUALITY \
-  SCRATCH_ROOT DOWNLOAD_DIR RESEQ_ROOT HF_BUCKET HF_RESEQ_PREFIX \
+  SCRATCH_ROOT DOWNLOAD_DIR RESEQ_ROOT HF_BUCKET HF_RESEQ_PREFIX HF_PILOT_PREFIX \
   SSL_CERT_FILE UPLOAD_MANIFEST_HASH_MAX_BYTES; do
   if [ "${!variable+x}" = "x" ]; then
     echo "Refusing inherited pipeline override: ${variable}" >&2
@@ -152,7 +152,8 @@ CUT_REVIEW_STATUS="unreviewed_pilot"
 E2E_EXPECTED_GIT_REVISION="${GIT_REVISION}"
 export PILOT_ID LOCATORS E2E_PILOT_QUALITY CUT_REVIEW_STATUS
 export E2E_EXPECTED_GIT_REVISION
-export HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced/pilots/${PILOT_ID}"
+export HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced"
+export HF_PILOT_PREFIX="${HF_RESEQ_PREFIX}/pilots/${PILOT_ID}"
 
 echo "Preparing the shared environment before submitting arrays."
 hv_sync_env
@@ -175,12 +176,12 @@ for locator in ${LOCATORS}; do
 done
 
 REMOTE_STATE="$(uv run --no-sync hf buckets list \
-  "${HF_RESEQ_PREFIX}" --recursive --format json)"
+  "${HF_PILOT_PREFIX}" --recursive --format json)"
 case "${REMOTE_STATE}" in
   ""|"[]") ;;
   *)
     echo "Pilot destination is not empty; refusing to overwrite an existing run:" >&2
-    echo "  ${HF_RESEQ_PREFIX}" >&2
+    echo "  ${HF_PILOT_PREFIX}" >&2
     exit 4
     ;;
 esac
@@ -188,7 +189,7 @@ esac
 PILOT_ROOT_MARKER="${RESEQ_ROOT}/.unreviewed_pilot_root"
 EXPECTED_ROOT_MARKER="v1|pilot_id=${PILOT_ID}"
 EXPECTED_ROOT_MARKER="${EXPECTED_ROOT_MARKER}|git_revision=${E2E_EXPECTED_GIT_REVISION}"
-EXPECTED_ROOT_MARKER="${EXPECTED_ROOT_MARKER}|hf_prefix=${HF_RESEQ_PREFIX}"
+EXPECTED_ROOT_MARKER="${EXPECTED_ROOT_MARKER}|hf_prefix=${HF_PILOT_PREFIX}"
 if [ -f "${PILOT_ROOT_MARKER}" ]; then
   if [ "$(cat "${PILOT_ROOT_MARKER}")" != "${EXPECTED_ROOT_MARKER}" ]; then
     echo "Existing pilot root marker does not match this tracked plan:" >&2
@@ -213,8 +214,8 @@ if [ -e "${PLAN_DIR}/submission.tsv" ] || \
 fi
 mkdir -p "${PLAN_DIR}" "${PUBLISH_DIR}"
 SUBMISSION_PARTIAL="${PLAN_DIR}/submission.tsv.partial"
-REMOTE_PLAN="${HF_RESEQ_PREFIX}/pilot_run"
-REMOTE_PLAN_PREFIX="${HF_RESEQ_PREFIX#${HF_BUCKET}/}/pilot_run"
+REMOTE_PLAN="${HF_PILOT_PREFIX}/pilot_run"
+REMOTE_PLAN_PREFIX="${HF_PILOT_PREFIX#${HF_BUCKET}/}/pilot_run"
 
 publish_submission_record() {
   local source="$1"
@@ -265,7 +266,9 @@ publish_submission_record "${PRIOR_SUBMISSION}" "prior_v1_submission.tsv"
   printf 'compression_quality\t%s\n' "${E2E_PILOT_QUALITY}"
   printf 'ssl_cert_file\t%s\n' "${SSL_CERT_FILE}"
   printf 'release_policy\t%s\n' "download_held_until_submission_record_verified"
-  printf 'hf_prefix\t%s\n' "${HF_RESEQ_PREFIX}"
+  printf 'hf_prefix\t%s\n' "${HF_PILOT_PREFIX}"
+  printf 'hf_pilot_prefix\t%s\n' "${HF_PILOT_PREFIX}"
+  printf 'hf_reseq_prefix\t%s\n' "${HF_RESEQ_PREFIX}"
   printf 'submitted_at_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"${SUBMISSION_PARTIAL}"
 publish_submission_record "${SUBMISSION_PARTIAL}" "submission.step00.tsv"
@@ -275,6 +278,7 @@ COMMON_EXPORT="${COMMON_EXPORT},E2E_PILOT_ID=${PILOT_ID}"
 COMMON_EXPORT="${COMMON_EXPORT},E2E_PILOT_QUALITY=${E2E_PILOT_QUALITY}"
 COMMON_EXPORT="${COMMON_EXPORT},E2E_EXPECTED_GIT_REVISION=${E2E_EXPECTED_GIT_REVISION}"
 COMMON_EXPORT="${COMMON_EXPORT},HF_RESEQ_PREFIX=${HF_RESEQ_PREFIX}"
+COMMON_EXPORT="${COMMON_EXPORT},HF_PILOT_PREFIX=${HF_PILOT_PREFIX}"
 COMMON_EXPORT="${COMMON_EXPORT},SSL_CERT_FILE=${SSL_CERT_FILE}"
 
 DOWNLOAD_JOB="$(sbatch --parsable \
@@ -346,7 +350,9 @@ Submitted ${PILOT_ID} at revision ${GIT_REVISION}.
   Stage 1 array     ${STAGE1_JOB}
   Stage 1a array    ${STAGE1A_JOB}
   Stage 2 gate      ${STAGE2_GATE_JOB} (serialized at one 192 GB task)
-  pilot artifacts   ${HF_RESEQ_PREFIX}
+  pilot evidence    ${HF_PILOT_PREFIX}
+  archival outputs  ${HF_RESEQ_PREFIX}/reseq_<key>
+  share derivatives ${HF_RESEQ_PREFIX}/compressed/reseq_<key>/${E2E_PILOT_QUALITY}
   submission record ${PLAN_DIR}/submission.tsv
   durable record    ${REMOTE_PLAN}/submission.tsv
 

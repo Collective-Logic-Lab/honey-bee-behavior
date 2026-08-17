@@ -1183,10 +1183,11 @@ class CompletionMarkerTests(unittest.TestCase):
             pilot_root.mkdir(parents=True)
             revision = "0123456789abcdef0123456789abcdef01234567"
             bucket = "hf://buckets/test/honey-bee"
-            prefix = f"{bucket}/resequenced/pilots/{pilot_id}"
+            reseq_prefix = f"{bucket}/resequenced"
+            pilot_prefix = f"{reseq_prefix}/pilots/{pilot_id}"
             (pilot_root / ".unreviewed_pilot_root").write_text(
                 f"v1|pilot_id={pilot_id}|git_revision={revision}|"
-                f"hf_prefix={prefix}\n"
+                f"hf_prefix={pilot_prefix}\n"
             )
             repository = Path(__file__).parents[1]
             script = r"""
@@ -1196,8 +1197,9 @@ export SCRATCH_ROOT="$2"
 export RESEQ_ROOT="$3"
 export HF_BUCKET="$4"
 export HF_RESEQ_PREFIX="$5"
-export E2E_PILOT_ID="$6"
-export E2E_EXPECTED_GIT_REVISION="$7"
+export HF_PILOT_PREFIX="$6"
+export E2E_PILOT_ID="$7"
+export E2E_EXPECTED_GIT_REVISION="$8"
 source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
 hv_require_pilot_context_if_set
 hv_require_pilot_root_for_path "${RESEQ_ROOT}"
@@ -1211,14 +1213,29 @@ hv_require_pilot_root_for_path "${RESEQ_ROOT}"
                 str(scratch),
                 str(pilot_root),
                 bucket,
-                prefix,
+                reseq_prefix,
+                pilot_prefix,
                 pilot_id,
                 revision,
             ]
             subprocess.run(command, check=True, capture_output=True, text=True)
 
+            misrouted_release = command.copy()
+            misrouted_release[8] = pilot_prefix
+            result = subprocess.run(
+                misrouted_release, capture_output=True, text=True
+            )
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("canonical resequenced prefix", result.stderr)
+
+            wrong_evidence = command.copy()
+            wrong_evidence[9] = f"{reseq_prefix}/pilots/wrong"
+            result = subprocess.run(wrong_evidence, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 4)
+            self.assertIn("tracked evidence prefix", result.stderr)
+
             unbound_script = script.replace(
-                'export E2E_PILOT_ID="$6"',
+                'export E2E_PILOT_ID="$7"',
                 "unset E2E_PILOT_ID",
             )
             result = subprocess.run(
@@ -1245,9 +1262,11 @@ hv_require_pilot_root_for_path "${RESEQ_ROOT}"
             pilot_root.mkdir(parents=True)
             revision = "0123456789abcdef0123456789abcdef01234567"
             bucket = "hf://buckets/test/honey-bee"
-            prefix = f"{bucket}/resequenced/pilots/{pilot_id}"
+            reseq_prefix = f"{bucket}/resequenced"
+            pilot_prefix = f"{reseq_prefix}/pilots/{pilot_id}"
             (pilot_root / ".unreviewed_pilot_root").write_text(
-                f"v1|pilot_id={pilot_id}|git_revision={revision}|hf_prefix={prefix}\n"
+                f"v1|pilot_id={pilot_id}|git_revision={revision}|"
+                f"hf_prefix={pilot_prefix}\n"
             )
             repository = Path(__file__).parents[1]
             script = r"""
@@ -1257,8 +1276,9 @@ export SCRATCH_ROOT="$2"
 export RESEQ_ROOT="$3"
 export HF_BUCKET="$4"
 export HF_RESEQ_PREFIX="$5"
-export E2E_PILOT_ID="$6"
-export E2E_EXPECTED_GIT_REVISION="$7"
+export HF_PILOT_PREFIX="$6"
+export E2E_PILOT_ID="$7"
+export E2E_EXPECTED_GIT_REVISION="$8"
 source "${HIVE_VIDEO_ROOT}/src/pipeline/slurm/resequence/common.sh"
 hv_require_pilot_context_if_set
 hv_require_pilot_root_for_path "${RESEQ_ROOT}"
@@ -1272,7 +1292,8 @@ hv_require_pilot_root_for_path "${RESEQ_ROOT}"
                 str(scratch),
                 str(pilot_root),
                 bucket,
-                prefix,
+                reseq_prefix,
+                pilot_prefix,
                 pilot_id,
                 revision,
             ]
@@ -1388,6 +1409,41 @@ fi
 
 
 class EndToEndPilotLauncherTests(unittest.TestCase):
+    def test_pipeline_sample_is_fail_closed_and_records_resources(self) -> None:
+        repository = Path(__file__).parents[1]
+        script_dir = repository / "src/pipeline/slurm/resequence"
+        sample = script_dir / "resequence_pipeline_sample.sh"
+        text = sample.read_text()
+        self.assertTrue(os.access(sample, os.X_OK))
+
+        result = subprocess.run(
+            ["bash", str(sample)], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("fail-closed", result.stderr)
+
+        for resource in (
+            'DOWNLOAD_MEM="4GB"',
+            'STAGE1_MEM="32GB"',
+            'STAGE1A_MEM="32GB"',
+            'STAGE2_MEM="192GB"',
+            'ARCHIVAL_UPLOAD_MEM="16GB"',
+            'COMPRESSION_MEM="8GB"',
+            'COMPRESSED_UPLOAD_MEM="4GB"',
+        ):
+            self.assertIn(resource, text)
+        self.assertIn('--dependency="aftercorr:${DOWNLOAD_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE1A_JOB}"', text)
+        self.assertIn('--dependency="aftercorr:${STAGE2_JOB}"', text)
+        self.assertIn('--array="${ARRAY_RANGE}%1"', text)
+        self.assertIn('scontrol release "${DOWNLOAD_JOB}"', text)
+        for readme in (
+            repository / "README.md",
+            repository / "src/resequence/README.md",
+        ):
+            self.assertIn("resequence_pipeline_sample.sh", readme.read_text())
+
     def test_launcher_fixes_inputs_dependencies_and_pilot_destination(self) -> None:
         repository = Path(__file__).parents[1]
         launcher = (
@@ -1403,6 +1459,14 @@ class EndToEndPilotLauncherTests(unittest.TestCase):
         self.assertIn(
             'RESEQ_ROOT="${SCRATCH_ROOT}/artifacts/resequence_pilots/'
             '${TRACKED_PILOT_ID}"',
+            text,
+        )
+        self.assertIn('HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced"', text)
+        self.assertIn(
+            'HF_PILOT_PREFIX="${HF_RESEQ_PREFIX}/pilots/${PILOT_ID}"', text
+        )
+        self.assertIn(
+            'COMMON_EXPORT="${COMMON_EXPORT},HF_PILOT_PREFIX=${HF_PILOT_PREFIX}"',
             text,
         )
         self.assertIn('--dependency="aftercorr:${DOWNLOAD_JOB}"', text)
@@ -1442,6 +1506,14 @@ class EndToEndPilotLauncherTests(unittest.TestCase):
         self.assertIn('LOCATORS="start1_side0_top start2_side0_top"', text)
         self.assertIn('CUT_REVIEW_STATUS="unreviewed_pilot"', text)
         self.assertIn('E2E_PILOT_QUALITY="low"', text)
+        self.assertIn('HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced"', text)
+        self.assertIn(
+            'HF_PILOT_PREFIX="${HF_RESEQ_PREFIX}/pilots/${PILOT_ID}"', text
+        )
+        self.assertIn(
+            'COMMON_EXPORT="${COMMON_EXPORT},HF_PILOT_PREFIX=${HF_PILOT_PREFIX}"',
+            text,
+        )
         self.assertIn('--dependency="aftercorr:${DOWNLOAD_JOB}"', text)
         self.assertIn('--dependency="aftercorr:${STAGE1_JOB}"', text)
         self.assertIn('--dependency="aftercorr:${STAGE1A_JOB}"', text)
@@ -1490,8 +1562,14 @@ class EndToEndPilotLauncherTests(unittest.TestCase):
             '${TRACKED_PILOT_ID}"',
             text,
         )
+        self.assertIn('HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced"', text)
         self.assertIn(
-            'HF_RESEQ_PREFIX="${HF_BUCKET}/resequenced/pilots/${PILOT_ID}"',
+            'HF_PILOT_PREFIX="${HF_RESEQ_PREFIX}/pilots/${PILOT_ID}"', text
+        )
+        self.assertIn("hf_pilot_prefix", text)
+        self.assertIn("hf_reseq_prefix", text)
+        self.assertIn(
+            'COMMON_EXPORT="${COMMON_EXPORT},HF_PILOT_PREFIX=${HF_PILOT_PREFIX}"',
             text,
         )
         self.assertIn("submission.step00.tsv", text)
@@ -1513,6 +1591,21 @@ class EndToEndPilotLauncherTests(unittest.TestCase):
             'EXPECTED_LOCATORS="start3_side0_top start3_side1_top '
             'start38_side0_top start38_side1_top"',
             gate_text,
+        )
+        self.assertIn(
+            'REMOTE="${HF_PILOT_PREFIX}/stage1a/reseq_${RESEQ_KEY}"',
+            gate_text,
+        )
+
+        upload_text = (script_dir / "resequence_upload.sh").read_text()
+        compression_text = (
+            script_dir / "compress_resequenced_upload.sh"
+        ).read_text()
+        self.assertIn("#SBATCH --mem=16GB", upload_text)
+        self.assertIn('REMOTE="${HF_RESEQ_PREFIX}/reseq_${KEY}"', upload_text)
+        self.assertIn(
+            'REMOTE="${HF_RESEQ_PREFIX}/compressed/reseq_${KEY}/${QUALITY}"',
+            compression_text,
         )
 
     def test_launcher_rejects_arguments_and_environment_overrides(self) -> None:
@@ -1605,6 +1698,7 @@ class EndToEndStage2GateTests(unittest.TestCase):
 set -eu
 HF_BUCKET="${HF_BUCKET}"
 HF_RESEQ_PREFIX="${HF_RESEQ_PREFIX}"
+HF_PILOT_PREFIX="${HF_PILOT_PREFIX}"
 hv_sync_env() { :; }
 hv_locator_for_task() { printf '%s\n' "${1%% *}"; }
 hv_resolve() {
@@ -1707,6 +1801,9 @@ print("92001;sol")
                 ),
                 "HF_BUCKET": "hf://buckets/test/honey-bee",
                 "HF_RESEQ_PREFIX": (
+                    "hf://buckets/test/honey-bee/resequenced"
+                ),
+                "HF_PILOT_PREFIX": (
                     "hf://buckets/test/honey-bee/resequenced/pilots/"
                     f"{pilot_id}"
                 ),
@@ -1762,6 +1859,11 @@ print("92001;sol")
                 and "CURRENT_STAGE1A.json" in event
             )
             self.assertLess(sync_index, commit_index)
+            self.assertIn(
+                "hf://buckets/test/honey-bee/resequenced/pilots/"
+                "start01_start02_side0_top_v1/stage1a/",
+                events[sync_index],
+            )
             staging = work / "e2e_pilot_stage1a_upload"
             self.assertTrue((staging / "qc_roll_flagged_joins.mp4").is_file())
             self.assertTrue(

@@ -45,7 +45,11 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 export VECLIB_MAXIMUM_THREADS=${VECLIB_MAXIMUM_THREADS:-1}
 
 export HF_BUCKET=${HF_BUCKET:-hf://buckets/collective-logic-lab/honey-bee}
+# Release bundles always use the canonical resequenced root. Tracked
+# unattended launchers set a separate evidence prefix for submissions and
+# Stage 1a outcomes that must retain pilot provenance.
 export HF_RESEQ_PREFIX=${HF_RESEQ_PREFIX:-${HF_BUCKET}/resequenced}
+export HF_PILOT_PREFIX=${HF_PILOT_PREFIX:-}
 
 cd "${HIVE_VIDEO_ROOT}"
 
@@ -94,12 +98,19 @@ hv_require_pilot_context_if_set() {
       exit 4
       ;;
   esac
-  local expected_prefix="${HF_BUCKET}/resequenced/pilots/${expected_id}"
+  local expected_reseq_prefix="${HF_BUCKET}/resequenced"
+  local expected_pilot_prefix="${expected_reseq_prefix}/pilots/${expected_id}"
   local expected_root="${SCRATCH_ROOT}/artifacts/resequence_pilots/${expected_id}"
-  if [ "${HF_RESEQ_PREFIX}" != "${expected_prefix}" ]; then
-    echo "Pilot isolation failure: HF_RESEQ_PREFIX is not the tracked pilot prefix." >&2
-    echo "  expected ${expected_prefix}" >&2
+  if [ "${HF_RESEQ_PREFIX}" != "${expected_reseq_prefix}" ]; then
+    echo "Pilot routing failure: HF_RESEQ_PREFIX is not the canonical resequenced prefix." >&2
+    echo "  expected ${expected_reseq_prefix}" >&2
     echo "  observed ${HF_RESEQ_PREFIX}" >&2
+    exit 4
+  fi
+  if [ "${HF_PILOT_PREFIX}" != "${expected_pilot_prefix}" ]; then
+    echo "Pilot isolation failure: HF_PILOT_PREFIX is not the tracked evidence prefix." >&2
+    echo "  expected ${expected_pilot_prefix}" >&2
+    echo "  observed ${HF_PILOT_PREFIX:-not_set}" >&2
     exit 4
   fi
   if [ "${RESEQ_ROOT}" != "${expected_root}" ]; then
@@ -131,7 +142,7 @@ hv_require_pilot_root_for_path() {
   hv_require_pilot_context_if_set
   local expected_marker="v1|pilot_id=${E2E_PILOT_ID}"
   expected_marker="${expected_marker}|git_revision=${E2E_EXPECTED_GIT_REVISION}"
-  expected_marker="${expected_marker}|hf_prefix=${HF_RESEQ_PREFIX}"
+  expected_marker="${expected_marker}|hf_prefix=${HF_PILOT_PREFIX}"
   if [ "$(cat "${marker}")" != "${expected_marker}" ]; then
     echo "Pilot root marker does not match the active pilot context: ${marker}" >&2
     exit 4

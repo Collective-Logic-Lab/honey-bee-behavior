@@ -17,7 +17,7 @@
 
 #SBATCH --job-name=bees-reseq-upload
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=4GB
+#SBATCH --mem=16GB
 #SBATCH -t 06:00:00
 #SBATCH -p public
 #SBATCH -q public

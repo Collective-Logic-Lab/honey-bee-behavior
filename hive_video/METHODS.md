@@ -215,19 +215,22 @@ The Stage 2 gate is limited to one 192 GB task at a time.
 
 As in HV-R002, Stage 1 proposals are deliberately labeled
 `cut_review_status=unreviewed_pilot`. Automatic join QC cannot establish that
-Stage 1 found every source cut, so an `auto_pass` remains pilot evidence rather
-than a validated inventory result. Every Stage 1a outcome is filed; flagged
+Stage 1 found every source cut, so the provenance and limitation remain
+explicit in every published result. Every Stage 1a outcome is filed; flagged
 videos stop with a compact review bundle, while cleared videos continue to the
 archival render and `low` (CRF 28, maximum-compression) derivative.
 
-Both scratch and Hugging Face outputs are isolated under
-`start03_start38_both_sides_top_v1`. This keeps the new Start 03 side 0 run
-separate from the older prior-batch archival result. The shared raw-download
-directory remains safe because completed files are size- and MD5-verified.
-The held download array is released only after the incremental submission
-record has been published and verified under the private pilot prefix.
+Scratch, submission records, and Stage 1a evidence are isolated under
+`start03_start38_both_sides_top_v1`. Cleared deliverables use the ordinary
+inventory layout: archival bundles under `resequenced/reseq_<key>/` and share
+derivatives under `resequenced/compressed/reseq_<key>/low/`. Separating these
+storage destinations is an organization decision, not an upgrade of the
+`unreviewed_pilot` validation status. The shared raw-download directory remains
+safe because completed files are size- and MD5-verified. The held download
+array is released only after the incremental submission record has been
+published and verified under the pilot-evidence prefix.
 
 **Revisit when.** Inspect the filed source-cut tables and any flagged join
-rolls before promoting results into validated inventory. Record the four-video
-automatic-clear rate as additional yield evidence, not as a calibrated
-population success estimate.
+rolls before treating canonical-path results as validated inventory. Record
+the four-video automatic-clear rate as additional yield evidence, not as a
+calibrated population success estimate.

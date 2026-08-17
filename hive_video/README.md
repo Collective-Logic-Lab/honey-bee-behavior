@@ -77,13 +77,19 @@ The archive resolves those starts to `20190608_181426` and `20190722_200917`.
 The launcher takes no arguments, verifies the four exact files and their real
 media TLS paths, and records the complete submission before releasing its held
 download array. Scratch work lives under
-`artifacts/resequence_pilots/start03_start38_both_sides_top_v1/`, and remote
-artifacts live under
+`artifacts/resequence_pilots/start03_start38_both_sides_top_v1/`. Remote
+submission and Stage 1a evidence live under
 `resequenced/pilots/start03_start38_both_sides_top_v1/`. Source-cut proposals
 are explicitly marked `unreviewed_pilot`; flagged videos stop after filing the
-compact review bundle, while Auto-QC-cleared videos continue to an archival MP4
-and a `low` (CRF 28, maximum-compression) sharing derivative. These artifacts
-do not replace validated inventory.
+compact review bundle. Auto-QC-cleared videos continue to the normal inventory
+layout: the archival bundle is filed at `resequenced/reseq_<key>/`, and its
+`low` (CRF 28, maximum-compression) sharing derivative at
+`resequenced/compressed/reseq_<key>/low/`. The archival metadata retains the
+unreviewed-pilot provenance even though the deliverables use canonical paths.
+For a new manually reviewed batch, copy
+`src/pipeline/slurm/resequence/resequence_pipeline_sample.sh` to a versioned
+launcher; the fail-closed sample records the current tested memory allocations
+and holds both review checkpoints until they are explicitly released.
 
 #### Recorded Start 01 / Start 02 pilot
 
@@ -103,14 +109,15 @@ bundle. Source-cut proposals are explicitly marked `unreviewed_pilot`.
 Every Stage 1a result is filed under
 `resequenced/pilots/start01_start02_side0_top_v2/`; flagged videos stop there
 cleanly, while automatically cleared videos continue to an archival MP4 and a
-`low` (CRF 28) sharing derivative. Pilot artifacts do not replace the validated
-inventory. Scratch work also uses the disjoint
+`low` (CRF 28) sharing derivative under the same canonical archival and
+compressed paths used by ordinary Stage 2 runs. Scratch work also uses the
+disjoint
 `artifacts/resequence_pilots/start01_start02_side0_top_v2/` root, whose marker
 prevents later generic compression/upload commands from losing that
 provenance. v1 is retained as the failed TLS-at-download attempt rather than
 being overwritten or requeued with changed settings. The launcher verifies the
 retained v1 record and incrementally files v2's submission/job-ID record under
-the private pilot prefix.
+the pilot-evidence prefix.
 
 #### 1. Download the raw video
 

@@ -33,7 +33,22 @@ sbatch src/pipeline/slurm/resequence/resequence_stage2_array.sh
 ```
 
 Stage 2 renders the full-fidelity MP4 and queues its dependent upload. The
-current bounded unattended batch covers both top-panel sides of Start 03
+copy-and-edit sample launcher shows the complete dependency chain and current
+Sol resource allocations:
+
+```bash
+cp src/pipeline/slurm/resequence/resequence_pipeline_sample.sh \
+  src/pipeline/slurm/resequence/submit_BATCH_e2e_v1.sh
+```
+
+The sample cannot submit unchanged. Replace its tracked plan literals, review
+and commit the copied zero-argument launcher, then run it with `bash`. It holds
+Stage 1a for source-cut inspection and Stage 2 for Auto-QC/manual approval.
+Its `--mem` values are total memory per allocation: download 4 GB, Stage 1 and
+Stage 1a 32 GB, serialized Stage 2 192 GB, archival upload 16 GB, compression
+8 GB, and compressed upload 4 GB.
+
+The current bounded unattended batch covers both top-panel sides of Start 03
 (`20190608_181426`) and Start 38 (`20190722_200917`):
 
 ```bash
@@ -43,9 +58,10 @@ bash src/pipeline/slurm/resequence/submit_start03_start38_both_sides_top_e2e_v1.
 This launcher requires a clean checkout published at `origin/main`, fixes all
 four locators and dependencies, and uses isolated pilot scratch and upload
 prefixes. Because it intentionally crosses the source-cut checkpoint without
-human inspection, its outputs remain pilot evidence: Auto-QC-cleared videos
-continue through rendering and maximum compression, while flagged videos file
-their compact review bundle and stop cleanly.
+human inspection, its submission and Stage 1a outcomes remain pilot evidence.
+Auto-QC-cleared videos continue through rendering and maximum compression into
+the canonical archival and compressed inventory paths, while flagged videos
+file their compact review bundle and stop cleanly.
 
 The earlier Start 01 / Start 02 integration pilot remains reproducible with its
 own fixed zero-argument launcher:
@@ -85,10 +101,13 @@ files belong to the current validated run.
 
 The fixed Start 01 / Start 02 pilot is intentionally different: it marks the
 unchanged source-cut proposals as `unreviewed_pilot`, files every Stage 1a
-outcome under a separate pilot prefix, and only lets auto-cleared videos
-continue. The v2 launcher also proves the manifest and actual media TLS paths
-with one-byte ranged GETs before submission; v1 remains the failed-attempt
-record. Its outputs are integration evidence rather than validated inventory.
+outcome under a separate pilot-evidence prefix, and only lets auto-cleared
+videos continue. Those cleared archival bundles go to
+`resequenced/reseq_<key>/`, while their share copies go to
+`resequenced/compressed/reseq_<key>/<quality>/`. The v2 launcher also proves
+the manifest and actual media TLS paths with one-byte ranged GETs before
+submission; v1 remains the failed-attempt record. All published metadata keeps
+the `unreviewed_pilot` provenance explicit.
 
 Compression is intentionally separate from resequencing: it creates a smaller
 H.264 sharing derivative while retaining the full-fidelity resequenced MP4.

@@ -3,7 +3,8 @@
 #
 # This is the Stage 2 worker for tracked unattended resequencing pilots. Submit
 # it only through a versioned parent launcher so the locators, provenance mode,
-# dependencies, and private pilot destination are fixed together.
+# dependencies, pilot-evidence destination, and canonical release destination
+# are fixed together.
 #
 # A manual_review_required result is a successful scientific outcome here:
 # its compact report bundle is published and the task stops without requesting
@@ -33,6 +34,7 @@ source "${SCRIPT_DIR}/common.sh"
 : "${E2E_PILOT_ID:?E2E_PILOT_ID must be supplied by the tracked pilot launcher.}"
 : "${E2E_PILOT_QUALITY:?E2E_PILOT_QUALITY must be supplied by the tracked pilot launcher.}"
 : "${E2E_EXPECTED_GIT_REVISION:?The tracked pilot revision is required.}"
+: "${HF_PILOT_PREFIX:?The tracked pilot evidence prefix is required.}"
 
 case "${E2E_PILOT_ID}" in
   start01_start02_side0_top_v1|start01_start02_side0_top_v2)
@@ -174,7 +176,7 @@ uv run --no-sync hf auth whoami --format json
 
 STAGING="${HV_WORK_DIR}/e2e_pilot_stage1a_upload"
 COMMIT_DIR="${HV_WORK_DIR}/e2e_pilot_stage1a_commit"
-REMOTE="${HF_RESEQ_PREFIX}/stage1a/reseq_${RESEQ_KEY}"
+REMOTE="${HF_PILOT_PREFIX}/stage1a/reseq_${RESEQ_KEY}"
 REMOTE_PREFIX="${REMOTE#${HF_BUCKET}/}"
 REMOTE_LISTING="${HV_WORK_DIR}/e2e_pilot_stage1a.remote_listing.json"
 
