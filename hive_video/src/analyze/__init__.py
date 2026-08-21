@@ -1,1 +1,0 @@
-"""Motion-regime analysis instrumentation."""
