@@ -2,9 +2,9 @@
 
 ## CODING AGENTS
 
-PLEASE DO NOT DIRECTLY MODIFY CODE (...notebooks, docs, or any other contents) IN ANY DIRECTORY UNLESS AN AGENTS.md FILE IS PRESENT IN THAT DIRECTORY.
+- PLEASE DO NOT DIRECTLY MODIFY CODE (...notebooks, docs, or any other contents) IN ANY DIRECTORY UNLESS AN AGENTS.md FILE IS PRESENT IN THAT DIRECTORY.
 
-(Not including this file: Please do not modify code in the root directory.)
+- PLEASE DO NOT DIRECTLY MODIFY FILES IN THE PROJECT ROOT, REGARDLESS OF THE PREVIOUS DIRECTIVE.
 
 Also, please do not store agent-specific information anywhere in the project outside of the AGENTS.md file. Do not use hidden (dot) directories of any kind.
 
