@@ -6,3 +6,11 @@ __pycache__
 # Virtual environment
 
 .venv
+
+# Ignore all contents of data/ except examples and temp/.gitkeep
+data/*
+!data/examples/
+!data/temp/
+data/temp/*
+!data/temp/.gitkeep
+
