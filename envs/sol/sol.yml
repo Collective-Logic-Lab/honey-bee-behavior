@@ -1,0 +1,27 @@
+# Starting recipe; validate on Sol before making the shared environment available.
+# Capture the exact Linux package builds after validation (see ../README.md).
+name: honey-bee-behavior-v1
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - numpy>=1.26,<3
+  - pandas>=2.2,<3
+  - scipy
+  - matplotlib-base
+  - seaborn
+  - scikit-learn
+  - pytables
+  - tqdm
+  - ipykernel
+  - ipywidgets
+  - ipympl
+  - jupyterlab
+  - ffmpeg
+  - opencv>=4.13,<5
+  - pillow>=12.2
+  # Runtime dependencies of the packages in sol-pip-requirements.txt.
+  - certifi>=2026.4.22
+  - filelock>=3.20
+  - pip
