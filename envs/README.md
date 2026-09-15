@@ -32,13 +32,17 @@ Developers can activate the shared environment at `/data/grp_bdaniel6/envs/honey
 
 ### Activate and check
 
-For terminal work, developers can request a compute allocation with:
+For a quick check of an existing environment, developers can request a basic compute allocation with:
 
 ```bash
 interactive
 ```
 
+For environment creation, developers can use the larger allocation [below](#creating-the-shared-environment). Analysis jobs can request resources suited to their workload.
+
 Within that allocation, these commands enter the checkout and load the environment using the [ASU Mamba instructions](https://docs.rc.asu.edu/mamba/). Adjust the checkout path if needed:
+
+> **Note** as of September 14 we are still working on the shared folder listed below. For the moment this path is not available and you have to build your own env as described below.
 
 ```bash
 cd ~/workspace/honey-bee-behavior
@@ -82,11 +86,13 @@ Developers maintaining a shared installation can build it from the files in [sol
 
 A shared installation needs a writable destination under `/data/grp_bdaniel6/envs` and group access to read and traverse that path. Building at the final location preserves the absolute paths in a Mamba environment. The example below creates `honey-bee-behavior-v1`; if that path already exists, use a new version name throughout the commands so existing analyses retain their current dependencies.
 
-The build can run in an interactive allocation:
+Developers can request 4 CPU cores, 32 GB of total memory, and one hour for the build, following the [ASU resource request guidance](https://docs.rc.asu.edu/requesting-resources/). Environment creation has run out of memory during package linking in a default allocation, even after dependency resolution succeeded. The following request provides more headroom for installation and runs from a login-node shell:
 
 ```bash
-interactive
+interactive -c 4 --mem=16G -t 01:00:00
 ```
+
+After an out-of-memory failure, developers can leave the previous allocation and request a new one with these settings. An interrupted installation can leave a partial environment; rebuilding into an unused prefix and running the confirmation script avoids relying on that partial installation.
 
 Once the allocation starts, these commands run from the checkout root. Each step depends on the previous step succeeding:
 
