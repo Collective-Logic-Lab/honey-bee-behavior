@@ -1,0 +1,4 @@
+# Install these published wheels with --no-deps --require-hashes --only-binary=:all:.
+# sol.yml supplies the scientific stack and remaining runtime dependencies.
+hive-video==0.1.1 --hash=sha256:fcfeabd7321000e224f32b86658a94cff3721377a608ca1966c7c15d34a5c23f
+portable-ffmpeg==0.3.0 --hash=sha256:076e3921ed96cb8f2bd27ba5b1e91069ef7d2574ecbd057c900ccbb2bd49c855
