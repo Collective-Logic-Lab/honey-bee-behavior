@@ -16,5 +16,6 @@ Also, please do not store agent-specific information anywhere in the project out
 
 ## HUMANS
 
-Please avoid automatic updates from coding agents in some of the modules/directories of this project. If you do want to use a coding agent, consider contributing a
-new module to the project and adding your own AGENTS.md file there.
+Please respect the instructions for coding agents in the various folders. Unless there is an explicit acceptance of AI code in a given folder, please don't contribute AI-generated code in that folder. If you run into the case where you would like to use a coding agent, consider contributing a new module/directory to the project and adding your own AGENTS.md file there.
+
+Agent-written commit messages are acceptable but *please* read them before contributing. Where possible, tag the relevant issue from Github in your commit messages (e.g., `Fixes #42`)

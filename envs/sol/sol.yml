@@ -18,6 +18,7 @@ dependencies:
   - ipywidgets
   - ipympl
   - jupyterlab
+  - gh
   - ffmpeg
   - opencv>=4.13,<5
   - pillow>=12.2

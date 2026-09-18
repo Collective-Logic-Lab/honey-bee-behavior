@@ -56,9 +56,23 @@ From the checkout root, developers can check the environment with:
 python envs/sol/confirm_env_sol.py
 ```
 
-The script reports the Python executable and environment path, checks imports and package dependencies, writes and reads a tiny HDF5 table, renders a plot without a display, and checks that FFmpeg and FFprobe start. It uses temporary files and exits with a nonzero status if a check fails. Passing these checks does not establish that every notebook or analysis works.
+The script reports the Python executable and environment path, checks imports and package dependencies, writes and reads a tiny HDF5 table, renders a plot without a display, and checks that FFmpeg, FFprobe, and GitHub CLI (`gh`) start. It uses temporary files and exits with a nonzero status if a check fails. The GitHub CLI check does not require a login. Passing these checks does not establish that every notebook or analysis works.
 
 Activation applies to the current shell, so each new terminal or Slurm job needs the module and activation commands before running Python. An existing compute allocation works without another `interactive` request.
+
+### Set up GitHub CLI
+
+The recipe includes [GitHub CLI (`gh`) from conda-forge](https://anaconda.org/conda-forge/gh) for workshop and contribution tasks. After activating the environment, developers can authenticate from their own Sol accounts and configure Git to use that login for HTTPS operations:
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git --hostname github.com
+gh auth status --hostname github.com
+```
+
+Follow the [browser login instructions](https://cli.github.com/manual/gh_auth_login) printed by `gh`; the URL and one-time code can be opened in a browser on your own computer. The CLI installation is shared, while each developer's authentication is stored separately under their Sol account. The [`setup-git` command](https://cli.github.com/manual/gh_auth_setup-git) configures Git's credential helper; the fork and upstream remotes remain as described above.
+
+An environment built before `gh` was added to the recipe needs a maintainer update or a new build before these commands are available.
 
 ### Use notebooks
 
@@ -80,7 +94,7 @@ Developers maintaining a shared installation can build it from the files in [sol
 
 | File | Purpose |
 | --- | --- |
-| [sol.yml](sol/sol.yml) | Python, scientific libraries, notebook tools, and native video dependencies from conda-forge. |
+| [sol.yml](sol/sol.yml) | Python, scientific libraries, notebook tools, GitHub CLI, and native video dependencies from conda-forge. |
 | [sol-pip-requirements.txt](sol/sol-pip-requirements.txt) | The two pinned, hashed wheels installed after Mamba. |
 | [confirm_env_sol.py](sol/confirm_env_sol.py) | A small environment check for an activated installation. |
 
