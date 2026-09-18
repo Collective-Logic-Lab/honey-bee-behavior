@@ -39,11 +39,11 @@ def run_command(args):
     return output.splitlines()[0] if output else "completed"
 
 
-def check_binary(name, version_flag="-version"):
+def check_binary(name, version_arg="-version"):
     executable = shutil.which(name)
     if executable is None:
         raise RuntimeError("not found on PATH; activate the shared environment")
-    return f"{executable} ({run_command([executable, version_flag])})"
+    return f"{executable} ({run_command([executable, version_arg])})"
 
 
 def check_hdf(directory):
@@ -78,12 +78,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix="confirm-env-sol-") as temporary:
         directory = Path(temporary)
         os.environ.setdefault("MPLCONFIGDIR", str(directory / "matplotlib"))
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["HF_HUB_DISABLE_UPDATE_CHECK"] = "1"
+        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
         failures += not check("Python version", check_python)
         for name in (
             "numpy", "pandas", "scipy", "matplotlib", "seaborn", "sklearn",
             "tables", "tqdm", "IPython", "ipykernel", "ipywidgets", "ipympl",
             "jupyterlab", "cv2", "PIL", "certifi", "filelock", "portable_ffmpeg", "hive_video",
-            "hive_video.resequence.cli",
+            "hive_video.resequence.cli", "huggingface_hub",
         ):
             failures += not check(name, lambda name=name: import_package(name))
         failures += not check(
@@ -94,6 +97,7 @@ def main():
         for name in ("ffmpeg", "ffprobe"):
             failures += not check(name, lambda name=name: check_binary(name))
         failures += not check("gh", lambda: check_binary("gh", "--version"))
+        failures += not check("hf", lambda: check_binary("hf", "version"))
 
     if failures:
         print(f"\n{failures} check(s) failed. Check the active environment and messages above.")

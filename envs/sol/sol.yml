@@ -19,6 +19,7 @@ dependencies:
   - ipympl
   - jupyterlab
   - gh
+  - huggingface_hub>=1,<2
   - ffmpeg
   - opencv>=4.13,<5
   - pillow>=12.2

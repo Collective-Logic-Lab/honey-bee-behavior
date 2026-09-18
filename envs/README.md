@@ -56,7 +56,7 @@ From the checkout root, developers can check the environment with:
 python envs/sol/confirm_env_sol.py
 ```
 
-The script reports the Python executable and environment path, checks imports and package dependencies, writes and reads a tiny HDF5 table, renders a plot without a display, and checks that FFmpeg, FFprobe, and GitHub CLI (`gh`) start. It uses temporary files and exits with a nonzero status if a check fails. The GitHub CLI check does not require a login. Passing these checks does not establish that every notebook or analysis works.
+The script reports the Python executable and environment path, checks imports and package dependencies, writes and reads a tiny HDF5 table, renders a plot without a display, and checks that FFmpeg, FFprobe, GitHub CLI (`gh`), and Hugging Face CLI (`hf`) start. It uses temporary files and exits with a nonzero status if a check fails. The CLI checks do not require a login, and the Hugging Face check runs offline. Passing these checks does not establish that every notebook or analysis works.
 
 Activation applies to the current shell, so each new terminal or Slurm job needs the module and activation commands before running Python. An existing compute allocation works without another `interactive` request.
 
@@ -73,6 +73,27 @@ gh auth status --hostname github.com
 Follow the [browser login instructions](https://cli.github.com/manual/gh_auth_login) printed by `gh`; the URL and one-time code can be opened in a browser on your own computer. The CLI installation is shared, while each developer's authentication is stored separately under their Sol account. The [`setup-git` command](https://cli.github.com/manual/gh_auth_setup-git) configures Git's credential helper; the fork and upstream remotes remain as described above.
 
 An environment built before `gh` was added to the recipe needs a maintainer update or a new build before these commands are available.
+
+### Use Hugging Face CLI
+
+The recipe includes [Hugging Face CLI (`hf`)](https://huggingface.co/docs/huggingface_hub/en/guides/cli) through the conda-forge package `huggingface_hub`. After activating the environment, developers can check the CLI and view download options:
+
+```bash
+hf version
+hf download --help
+```
+
+Public, ungated downloads can run without a login. For private or gated repositories, or to upload files, developers can run `hf auth login` from their own Sol accounts and follow its prompts. Authentication is personal to each account. Downloads can use `--local-dir` to select a destination such as `/data/grp_bdaniel6/honeybee/data/raw/`.
+
+For an existing shared environment, its maintainer can add the CLI from a compute allocation with Mamba loaded:
+
+```bash
+mamba install --freeze-installed \
+  --prefix /data/grp_bdaniel6/envs/honey-bee-behavior-v1 \
+  --override-channels -c conda-forge 'huggingface_hub>=1,<2'
+```
+
+The `--freeze-installed` option keeps installed dependencies fixed. Review the proposed transaction before confirming, then run `python envs/sol/confirm_env_sol.py` from the checkout with the shared environment activated. If the addition cannot resolve with existing packages fixed, developers can build and validate a new environment version as described below.
 
 ### Use notebooks
 
@@ -94,7 +115,7 @@ Developers maintaining a shared installation can build it from the files in [sol
 
 | File | Purpose |
 | --- | --- |
-| [sol.yml](sol/sol.yml) | Python, scientific libraries, notebook tools, GitHub CLI, and native video dependencies from conda-forge. |
+| [sol.yml](sol/sol.yml) | Python, scientific libraries, notebook tools, GitHub and Hugging Face CLIs, and native video dependencies from conda-forge. |
 | [sol-pip-requirements.txt](sol/sol-pip-requirements.txt) | The two pinned, hashed wheels installed after Mamba. |
 | [confirm_env_sol.py](sol/confirm_env_sol.py) | A small environment check for an activated installation. |
 
