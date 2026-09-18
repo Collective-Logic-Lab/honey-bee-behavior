@@ -39,11 +39,11 @@ def run_command(args):
     return output.splitlines()[0] if output else "completed"
 
 
-def check_binary(name):
+def check_binary(name, version_flag="-version"):
     executable = shutil.which(name)
     if executable is None:
         raise RuntimeError("not found on PATH; activate the shared environment")
-    return f"{executable} ({run_command([executable, '-version'])})"
+    return f"{executable} ({run_command([executable, version_flag])})"
 
 
 def check_hdf(directory):
@@ -93,6 +93,7 @@ def main():
         failures += not check("Headless plotting", lambda: check_plot(directory))
         for name in ("ffmpeg", "ffprobe"):
             failures += not check(name, lambda name=name: check_binary(name))
+        failures += not check("gh", lambda: check_binary("gh", "--version"))
 
     if failures:
         print(f"\n{failures} check(s) failed. Check the active environment and messages above.")
