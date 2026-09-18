@@ -42,7 +42,7 @@ For environment creation, developers can use the larger allocation [below](#crea
 
 Within that allocation, these commands enter the checkout and load the environment using the [ASU Mamba instructions](https://docs.rc.asu.edu/mamba/). Adjust the checkout path if needed:
 
-> **Note** as of September 14 we are still working on the shared folder listed below. For the moment this path is not available and you have to build your own env as described below.
+> **Note** this environment is now available! The commands immediately below should quickly allow you to work on Sol.
 
 ```bash
 cd ~/workspace/honey-bee-behavior
