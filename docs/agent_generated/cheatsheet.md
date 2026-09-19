@@ -129,7 +129,7 @@ The [`gh` default repository](https://cli.github.com/manual/gh_repo_set-default)
 
 **7. Develop on branches: choose Git or GitHub CLI**
 
-There are two ways to start a branch. **Option A uses Git directly and is the simplest starting point.** Option B uses `gh` to name and link a branch to a lab issue, with some additional setup. Choose one option for each new branch.
+There are two ways to start a branch. **Option A uses Git directly and is the simplest starting point.** Option B uses `gh` to name and link a branch to a lab issue, specifying your fork as the branch destination. Choose one option for each new branch.
 
 Before either option, use the **Update `main` from the lab repository** instructions in step 9. This brings both your local `main` and your fork's `main` up to date and leaves you on `main`, ready to create a branch. Keep your own changes on issue branches.
 
@@ -153,7 +153,19 @@ This creates the matching branch on your fork and sets it as the local branch's 
 
 This option lets GitHub generate the branch name from an issue, creates the branch in your fork immediately, and checks it out locally. The issue link carries through when you open a pull request, helping keep the issue, branch, and PR together. You still commit and push your code changes and open the PR. See [GitHub's issue-branch workflow](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/creating-a-branch-for-an-issue).
 
-It needs an extra configuration step because the built-in `gh issue develop` command has no separate default for the branch repository. Without `--branch-repo`, it creates branches in the issue's repository. Install this [`gh` alias](https://cli.github.com/manual/gh_alias_set) once on each computer where you want to use this option:
+The built-in `gh issue develop` command has no separate default for the branch repository. Without `--branch-repo`, it creates branches in the issue's repository. After setting the lab as the default in step 6, use the explicit command we used in the seminar:
+
+```bash
+gh issue view ISSUE_NUMBER
+gh issue develop ISSUE_NUMBER -c --branch-repo YOUR_GITHUB_USERNAME/honey-bee-behavior
+git status --short --branch
+```
+
+`-c` means check out the new branch. Replace the issue number and username; record the generated branch name for later pushes and the PR. The Git seminar scenario after step 9 walks through the complete process.
+
+**Optional shortcut for repeated use**
+
+To avoid typing `--branch-repo` each time, install this [`gh` alias](https://cli.github.com/manual/gh_alias_set) once on each computer where you want the shortcut:
 
 ```bash
 gh alias set develop --shell '
@@ -256,7 +268,7 @@ gh pr create --draft \
 
 Follow the prompts for the title and description. Explain what changed, why, what you checked, and what remains uncertain. Use a draft while work is in progress and mark it ready when it is ready for review.
 
-For a contribution that addresses part of a larger issue, write `Refs #ISSUE_NUMBER` in the lab PR description and explain what remains. Use `Closes #ISSUE_NUMBER` when the PR completes the issue. A PR from a `gh develop` branch can already have a closing issue link: for partial work, have a maintainer check and remove that link before merging. See GitHub's [issue-linking behavior](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue).
+For a contribution that addresses part of a larger issue, write `Refs #ISSUE_NUMBER` in the lab PR description and explain what remains. Use `Closes #ISSUE_NUMBER` when the PR completes the issue. A PR from a `gh issue develop` branch (including the `gh develop` shortcut) can already have a closing issue link: for partial work, have a maintainer check and remove that link before merging. See GitHub's [issue-linking behavior](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue).
 
 To address feedback, make further edits on the same branch, check them, commit, and push. The existing PR updates automatically; you do not need a new branch or PR for each revision. Follow the lab's [contribution guide](https://github.com/Collective-Logic-Lab/honey-bee-behavior/blob/main/CONTRIBUTING.md); repository administrators handle merges.
 
@@ -301,7 +313,178 @@ git pull --ff-only origin YOUR_BRANCH
 
 This assumes the branch already exists locally and on your fork; see 10c for its first checkout on Sol. Reopen notebooks and restart their kernels after updating so they use the new code.
 
-Updating `main` does **not** update an existing issue branch. Bringing newer lab changes into ongoing work is a separate merge or rebase step; ask for help with that during the guided session. If a pull or push is rejected, stop and inspect the situation with a collaborator before continuing.
+Updating `main` does **not** update an existing issue branch. Bringing newer lab changes into ongoing work is a separate merge or rebase step; the seminar scenario below shows the merge approach. If a pull or push is rejected, stop and inspect the situation with a collaborator before continuing.
+
+<details>
+<summary><strong>From the seminar: take an issue from your fork through review and back to main</strong></summary>
+
+This expands the seminar's fork-and-PR workflow into a complete sequence. Start with your own fork on GitHub and the login from steps 2–3. Replace `YOUR_GITHUB_USERNAME`, `ISSUE_NUMBER`, `YOUR_BRANCH`, and `PR_NUMBER` as you go; issue and PR numbers are different. Run commands one step at a time and stop if a command fails. Before switching branches or merging, save and close notebooks and preserve your edits in commits on the appropriate branch.
+
+**A. Clone your fork and connect it to the lab repository**
+
+For a new checkout:
+
+```bash
+mkdir -p ~/workspace
+cd ~/workspace
+git clone https://github.com/YOUR_GITHUB_USERNAME/honey-bee-behavior.git
+cd honey-bee-behavior
+git remote add upstream https://github.com/Collective-Logic-Lab/honey-bee-behavior.git
+```
+
+If you already cloned the repository, enter that checkout instead. Check `git remote -v`; add `upstream` only if it is missing. If it points elsewhere, correct it with `git remote set-url upstream https://github.com/Collective-Logic-Lab/honey-bee-behavior.git`.
+
+```bash
+git remote -v
+git config remote.pushDefault origin
+git config push.default simple
+gh repo set-default Collective-Logic-Lab/honey-bee-behavior
+gh repo set-default --view
+gh issue list
+```
+
+Confirm that `origin` is your fork, `upstream` is the lab repository, and the issues belong to the lab. These are separate settings: Git knows where to fetch and push, while `gh` knows where to look for issues and PRs. If your commit identity is not configured, set it for this checkout:
+
+```bash
+git config user.name "Your Name"
+git config user.email "YOUR_COMMIT_EMAIL"
+```
+
+Use an email associated with your GitHub account, including its `noreply` address if preferred.
+
+**B. Update both copies of main, then create the issue branch**
+
+Continue with a clean working tree:
+
+```bash
+git status
+git fetch upstream
+git switch main
+git merge --ff-only upstream/main
+git push origin main
+gh issue view ISSUE_NUMBER
+gh issue develop ISSUE_NUMBER -c --branch-repo YOUR_GITHUB_USERNAME/honey-bee-behavior
+git branch --show-current
+git status --short --branch
+```
+
+The push updates your fork's `main` on GitHub, so the new branch can start from the latest lab code. The default `gh` repository supplies the issue, `--branch-repo` selects your fork, and `-c` checks out the new branch. No alias is needed. Record the generated branch name and substitute it for `YOUR_BRANCH` below. If the branch already exists, use `git switch YOUR_BRANCH` rather than creating it again. See the [`gh issue develop` reference](https://cli.github.com/manual/gh_issue_develop).
+
+**C. Develop and commit on that branch**
+
+Edit and save your files, then run an appropriate check or small example. Stage only the files you intend to contribute, repeating `git add` as needed:
+
+```bash
+git status --short --branch
+git diff
+git add PATH_TO_CHANGED_FILE
+git diff --staged
+git commit -m "Describe the change"
+git status
+```
+
+**D. Check upstream again before opening the PR**
+
+The lab may have merged other work while you were editing. With your changes committed and your working tree clean, bring that work into the issue branch:
+
+```bash
+git switch YOUR_BRANCH
+git fetch upstream
+git log --oneline HEAD..upstream/main
+git merge --no-edit upstream/main
+```
+
+The log shows upstream commits your branch does not yet contain. This merge can create a merge commit when both branches have changed; it preserves your existing commits. If Git reports conflicts, stop before pushing. Resolve the marked files with a collaborator, stage the resolved files, and finish with `git commit`. To abandon that merge attempt and return to your pre-merge work, use `git merge --abort`.
+
+After a successful merge, rerun the relevant checks and inspect the contribution relative to the lab:
+
+```bash
+git status
+git diff --stat upstream/main...HEAD
+git diff upstream/main...HEAD
+git push -u origin YOUR_BRANCH
+gh pr create --repo Collective-Logic-Lab/honey-bee-behavior \
+  --base main --head YOUR_GITHUB_USERNAME:YOUR_BRANCH
+```
+
+Follow the prompts for the PR title and description. Explain the change and checks, and reference the lab issue as described in step 8. An issue-linked branch can close its issue when merged, so check that association if this PR only completes part of the issue. Record the PR number from the resulting URL. The repository administrators handle the merge.
+
+**E. If a reviewer requests changes, continue on the same branch**
+
+A request for changes is another round of development. Open the review, including comments attached to particular lines:
+
+```bash
+gh pr view PR_NUMBER --repo Collective-Logic-Lab/honey-bee-behavior --web
+git status
+git switch YOUR_BRANCH
+git pull --ff-only origin YOUR_BRANCH
+```
+
+Continue only with a clean working tree and a successful pull. Make the requested edits, save, and run the relevant checks. Then:
+
+```bash
+git diff
+git add PATH_TO_CHANGED_FILE
+git diff --staged
+git commit -m "Address review feedback"
+```
+
+Repeat step D's upstream fetch and merge, rerun checks if the merge changes your code, and push:
+
+```bash
+git push origin YOUR_BRANCH
+```
+
+The existing PR receives these commits automatically. Reply to the reviewer on GitHub with what changed and request another look; a new PR is unnecessary for an open review. If the PR was actually **closed without merging**, pushing does not reopen it. Discuss whether to reopen it or take a different approach before continuing.
+
+**F. After the PR is merged, sync main and retire the completed branch**
+
+Check the specific PR first:
+
+```bash
+gh pr view PR_NUMBER --repo Collective-Logic-Lab/honey-bee-behavior \
+  --json state,headRefName,headRefOid
+git rev-parse YOUR_BRANCH
+git status
+```
+
+Continue only when the PR state is `MERGED`, its branch name is the one you intend to retire, its `headRefOid` matches the local branch hash, and your working tree is clean. If the hashes differ, keep the branch and inspect it for later or unpushed work.
+
+```bash
+git switch main
+git pull --ff-only upstream main
+git push origin main
+git branch -d YOUR_BRANCH
+```
+
+You are now back on local `main`, and both it and your fork's remote `main` contain the merged lab changes. If the pull or push fails, stop before deleting anything. Delete the completed **branch**, not the GitHub issue, which remains a useful record of the work.
+
+After a squash merge, Git may refuse `git branch -d` because the merged commit has a different identity. Only after the checks above confirm that the exact branch contents were merged and no later work remains, remove that local branch with:
+
+```bash
+git branch -D YOUR_BRANCH
+```
+
+Do not use `-D` as an automatic response to a deletion error. Conversely, a successful `-d` alone does not prove a PR was merged: Git may be comparing with the branch in your fork. See [Git's branch deletion rules](https://git-scm.com/docs/git-branch).
+
+Optionally remove the completed branch from your fork too. First fetch and check that its remote hash still matches the merged PR's `headRefOid`:
+
+```bash
+git fetch origin --prune
+git rev-parse origin/YOUR_BRANCH
+```
+
+If it matches and nobody is continuing work there, replace `MERGED_HEAD_HASH` below with that full verified `headRefOid`:
+
+```bash
+git push --force-with-lease=refs/heads/YOUR_BRANCH:MERGED_HEAD_HASH \
+  origin --delete YOUR_BRANCH
+git fetch origin --prune
+```
+
+The lease makes deletion conditional on the remote branch still having that exact hash. If it is rejected, stop and inspect; do not retry without the lease. Skip remote deletion if GitHub already removed the branch. Start the next task from updated `main` with a new issue branch.
+
+</details>
 
 **10. Work on ASU Sol**
 
@@ -362,7 +545,7 @@ git remote -v
 
 If the checkout already exists, enter it and check its remotes instead of cloning or adding `upstream` again. As on your laptop, `origin` should be your fork and `upstream` should be the lab repository.
 
-To start a new branch on Sol, choose either option in step 7. The Git option needs no alias. If you choose the optional `gh` workflow, run its alias setup once on Sol as well; then `gh develop ISSUE_NUMBER --checkout` uses upstream issues and creates branches in your fork.
+Usually, check out the branch you already pushed from your laptop, as shown in the Sol seminar scenario below and in 10c. To start a new branch on Sol, choose either option in step 7; `gh issue develop ISSUE_NUMBER -c --branch-repo YOUR_GITHUB_USERNAME/honey-bee-behavior` needs no alias.
 
 From the repository root, check the environment:
 
@@ -387,6 +570,123 @@ hive-video fragment \
 This writes a one-second video and its JSON metadata on Sol. Use a new output filename when repeating the example; existing outputs are protected against overwriting. Other analyses may need separately configured data paths. Large datasets and outputs should use the appropriate project or scratch storage, following the [repository guide](https://github.com/Collective-Logic-Lab/honey-bee-behavior/blob/main/envs/README.md).
 
 For each new Sol terminal or job, load the Mamba module and activate the environment again. Your GitHub login normally persists under your Sol account. When finished with a terminal compute session, use `exit` to release that allocation. If setting up Jupyter next, register its kernel below before exiting.
+
+<details>
+<summary><strong>From the seminar: first-time Git and GitHub setup on Sol</strong></summary>
+
+Use this sequence if you have a Sol account but have not configured Git or cloned the repository there. Your personal GitHub fork should already exist; use the same fork as on your laptop. Sol has its own checkout, authentication, and Git settings.
+
+**A. Activate the environment before setting up GitHub access**
+
+Open Sol's **System → Shell Access** in the web portal, or connect by SSH as described in 10a. In that Sol terminal, request a compute allocation:
+
+```bash
+interactive
+```
+
+Wait until the allocation starts. If you are using a terminal inside an existing Sol Jupyter allocation, skip `interactive`. Then:
+
+```bash
+module load mamba/latest
+source activate /data/grp_bdaniel6/envs/honey-bee-behavior-v1
+gh --version
+gh auth status --hostname github.com
+```
+
+Activating the shared environment makes its `gh` command available. If the status check says you are not logged in, sign in:
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+```
+
+Open the printed URL in your laptop's browser and enter the code printed in the Sol terminal. After login, or if you were already authenticated, connect Git to those credentials:
+
+```bash
+gh auth setup-git --hostname github.com
+gh auth status --hostname github.com
+```
+
+This configures Git on Sol to use your GitHub CLI login for HTTPS operations, including cloning and pushing. It does not copy your laptop's Git configuration or set the author name and email for commits. See [`gh auth setup-git`](https://cli.github.com/manual/gh_auth_setup-git).
+
+**B. Clone once, then configure the checkout**
+
+```bash
+mkdir -p ~/workspace
+cd ~/workspace
+git clone https://github.com/YOUR_GITHUB_USERNAME/honey-bee-behavior.git
+cd honey-bee-behavior
+
+git config user.name "Your Name"
+git config user.email "YOUR_COMMIT_EMAIL"
+git remote add upstream https://github.com/Collective-Logic-Lab/honey-bee-behavior.git
+git config remote.pushDefault origin
+git config push.default simple
+gh repo set-default Collective-Logic-Lab/honey-bee-behavior
+
+git remote -v
+gh repo set-default --view
+gh issue list
+git fetch upstream
+git switch main
+git merge --ff-only upstream/main
+git push origin main
+python envs/sol/confirm_env_sol.py
+```
+
+Replace the username, name, and email placeholders with your own details; the email should be associated with GitHub or be your GitHub `noreply` address. This sets commit authorship for this checkout. Run each command only after the preceding one succeeds. The remotes should identify your fork as `origin` and the lab as `upstream`; `gh` should show the lab's issues. The final command checks the software environment.
+
+**C. Run the work you pushed from your laptop**
+
+We generally use Sol to execute code developed on laptops, so most commits will come from your laptop. Commit and push your issue branch there first. For its first checkout on Sol:
+
+```bash
+git fetch origin
+git switch --track origin/YOUR_BRANCH
+git status --short --branch
+git log -1 --oneline
+```
+
+If the branch already exists locally, save and close notebooks and confirm a clean working tree, then use:
+
+```bash
+git status
+git switch YOUR_BRANCH
+git pull --ff-only origin YOUR_BRANCH
+git log -1 --oneline
+```
+
+You can now run the CLI example in 10a or open notebooks using the shared Jupyter kernel in 10b. Reopen notebooks and restart their kernels after pulling code updates. A branch switch selects code; environment activation and kernel selection select the Python environment.
+
+**D. Save an intentional notebook improvement made on Sol**
+
+An exception to laptop-first development is a notebook you edit while running it on Sol. Save it, review its code, outputs, and metadata, and commit only the changes worth sharing. On the same issue branch:
+
+```bash
+git status --short --branch
+git diff -- notebooks/YOUR_NOTEBOOK.ipynb
+git add notebooks/YOUR_NOTEBOOK.ipynb
+git diff --staged
+git commit -m "Describe the notebook improvement"
+git push -u origin YOUR_BRANCH
+```
+
+Running cells alone may change outputs and execution counts; those changes do not all need to become a contribution. If a push is rejected because the branch has advanced elsewhere, preserve your commit and resolve the divergence with a collaborator before continuing.
+
+Before making further edits on your **laptop**, save and preserve any local work, then with a clean working tree:
+
+```bash
+cd ~/workspace/honey-bee-behavior
+git status
+git switch YOUR_BRANCH
+git pull --ff-only origin YOUR_BRANCH
+git log -1 --oneline
+```
+
+The Sol commit is now available locally and, if the branch already has an open PR, in that same PR. Follow the Git seminar scenario above for upstream checks, review, and cleanup. Saving a notebook on Sol is not enough to transfer it: commit, push, then pull on the other computer.
+
+On later visits, load the Mamba module and activate the environment again; the login and checkout settings normally persist. Use `exit` to release a shell allocation when finished, or stop a Jupyter allocation through **My Interactive Sessions** in the portal.
+
+</details>
 
 **10b. Use Jupyter on Sol with the shared environment**
 
