@@ -54,7 +54,7 @@ You’re now ready to clone this repository.
 
 Open your terminal, and navigate to the folder you want your repository to live in.
 Run:
-"git clone <web url of your repository>.git"
+"git clone (web url of your repo here).git"
 You can also find the web url.git by pressing the “Code” button
 
 <img width="477" height="267" alt="Screenshot 2026-09-14 170006" src="https://github.com/user-attachments/assets/8c769af5-36fc-490e-b142-53a13e8d0efc" />
