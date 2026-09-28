@@ -73,6 +73,8 @@ To create your branch and switch to it, type:
 
 ## Step 3: Create a Virtual Environment with the Right Packages
 
+*note, the lab has a premade virtual environment you can (and probably will) use, but here is how to make your own anyway
+
 A virtual environment is needed to contain the required packages in one project, preventing version conflicts with other project packages. To create a virtual environment, go into the honey-bee-behavior folder and type: 
 “python3 -m venv <environment name>”
 
@@ -80,7 +82,7 @@ If you are not using Powershell, find the relevant commands here:
 https://docs.python.org/3/library/venv.html
 
 To activate your virtual environment, type: 
-“<environment name>\Scripts\Activate.ps1”
+“*<environment name>\Scripts\Activate.ps1”
 
 
 Once your virtual environment is activated, you should see your environment name in parentheses at the start of each line. Make sure whenever you download a package or run a file in this project, you have the virtual environment activated!
