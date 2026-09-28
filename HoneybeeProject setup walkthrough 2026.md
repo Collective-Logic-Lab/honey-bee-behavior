@@ -82,7 +82,7 @@ If you are not using Powershell, find the relevant commands here:
 https://docs.python.org/3/library/venv.html
 
 To activate your virtual environment, type: 
-“*<environment name>\Scripts\Activate.ps1”
+“\<environment name>\Scripts\Activate.ps1”
 
 
 Once your virtual environment is activated, you should see your environment name in parentheses at the start of each line. Make sure whenever you download a package or run a file in this project, you have the virtual environment activated!
@@ -131,7 +131,7 @@ After you’ve changed, added to, or created a file(s), you will want to make su
 Make sure all your changes are saved and head back to your terminal.
 
 Then you can decide what changes you'd like to see made in the original repository.
-Type "git status" to see the modifications you've made. Be sure to unstage the data folders or files you added—there's just not space to fit them in the repo, so keep them local.
+Type "git status" to see the modifications you've made. Be sure to unstage the data folders or files you added—there's just not space to fit them in the repo, so keep them local. Can also use '.gitignore' to automatically ignore data files
 "git restore --staged <file>" to unstage a file
 "git add <file>" to stage a file
 
