@@ -248,7 +248,44 @@ Click on upload—>Browse Folders—> and choose your git clone FOLDER
 
 <img width="724" height="188" alt="Screenshot 2026-09-09 170309" src="https://github.com/user-attachments/assets/681e3fd5-2887-4070-aaae-fc600e48269a" />
 
-Go to interactive apps 
+There is already a shared enviorment for the Bee lab called honey-bee-behavior that has all the packages you need, so that is most likley what you will use 
+
+go to System → Shell Access
+
+```bash
+ssh YOUR_ASURITE@sol.asu.edu
+```
+The following commands run in the **Sol terminal**.
+
+Request a compute session, then activate the shared environment. Wait for the allocation to start before continuing:
+
+```bash
+interactive
+module load mamba/latest
+source activate /data/grp_bdaniel6/envs/honey-bee-behavior-v1
+gh --version
+```
+
+This is the repository's basic allocation for quick checks. Choose suitable CPU, memory, and time requests for larger work using ASU's [resource guide](https://docs.rc.asu.edu/requesting-resources/). Run analyses in a compute allocation. If you are already in one, including a Sol Jupyter session, skip `interactive`.
+
+
+After activating the shared environment, register it as a kernel for your Sol account. Do this once for each environment version:
+
+```bash
+python -m ipykernel install --user \
+  --name honey-bee-behavior-v1 \
+  --display-name "Honey Bee Behavior (v1)"
+```
+
+This registers the existing environment with Jupyter, following ASU's [instructions for environments under `/data`](https://docs.rc.asu.edu/jupyter-kernels/#creating-kernels-from-a-data-directory).
+
+1. Open the [Sol web portal](https://sol.asu.edu) and choose **Interactive Apps → Jupyter**.
+2. Request resources appropriate for your notebook, launch the session, and connect when it is ready.
+3. In Jupyter, navigate to your Sol checkout, such as `workspace/honey-bee-behavior/notebooks`, and open a notebook.
+4. Select **Honey Bee Behavior (v1)** as its kernel.
+
+Your laptop displays the browser interface; the notebook files and Python process are on Sol. Check the selected Python and current directory in a notebook cell:
+
 
 <img width="467" height="228" alt="Screenshot 2026-09-14 175029" src="https://github.com/user-attachments/assets/5a1d5f59-fbf0-45d8-b1bb-839b23f3a98a" />
 
