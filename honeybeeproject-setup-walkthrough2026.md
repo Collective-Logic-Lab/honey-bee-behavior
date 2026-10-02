@@ -6,16 +6,28 @@ Python is the main programming language used for this project. If you already ha
 You can check this by running “python --version” or “python3 --version” in your command line. If you don’t have Python installed, check the link below to find the right version.
 https://realpython.com/installing-python/
 
-You could also use command line 
+You could also use the command line:
 
-    For Windows:  winget install Python.Python.3 
-    
-    For Linux (Ubuntu / Debian / Mint): 	sudo apt update
-                                          sudo apt install python3 python3-pip 
-    For MacOS: brew install python3 
+- For Windows:  
 
-Check: python3 --version 
+```sh
+winget install Python.Python.3
+```
 
+- For Linux (Ubuntu / Debian / Mint): 	
+
+```sh
+sudo apt update
+sudo apt install 
+python3 python3-pip
+```
+
+- For MacOS:
+
+```sh
+brew install python3
+python3 --version    # should return 3.x version number
+```
 
 ### Git
 Git is needed to clone and work within the Honey-Bee-Behavior repository. If you don’t have git installed, follow this link and download the right version for your system.
@@ -69,7 +81,6 @@ To create your branch and switch to it, type:
 "git checkout -b <branch name>"
 
 "git branch" should now show your branch and have a little star next to it!
-
 
 ## Step 3: Create a Virtual Environment with the Right Packages
 
